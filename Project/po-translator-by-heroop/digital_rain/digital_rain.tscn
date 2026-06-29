@@ -1,0 +1,38 @@
+[gd_scene load_steps=4 format=3 uid="uid://c7x8k3n1m2p4q"]
+
+[ext_resource type="Shader" path="res://digital_rain/digital_rain.gdshader" id="1_shader"]
+[ext_resource type="Script" path="res://digital_rain/digital_rain_bg.gd" id="2_script"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_rain"]
+render_priority = -1
+shader = ExtResource("1_shader")
+shader_parameter/speed = 0.8
+shader_parameter/density = 0.7
+
+[node name="DigitalRain" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("2_script")
+
+[node name="RainLayer" type="ColorRect" parent="."]
+material = SubResource("ShaderMaterial_rain")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 1)
+
+[node name="DarkOverlay" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.7)

@@ -1,0 +1,608 @@
+import json, sys, urllib.request, urllib.error, urllib.parse, traceback, os, zipfile, xml.etree.ElementTree as ET, re
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+po_path       = sys.argv[1]
+src_lang      = sys.argv[2]
+target_lang   = sys.argv[3]
+batch_size    = int(sys.argv[4])
+progress_path = sys.argv[5]
+project_path  = sys.argv[6] if len(sys.argv) > 6 else ""
+
+result_path = progress_path.replace("_translate_progress.json", "_translate_result.json")
+log_path    = progress_path.replace("_translate_progress.json", "_translate_debug.log")
+
+def log(msg):
+    try:
+        with open(log_path, "a", encoding="utf-8") as lf:
+            lf.write(msg + "\n")
+    except:
+        pass
+
+log("=== translate_full.py started ===")
+log("po_path=%s" % po_path)
+log("project_path=%s" % project_path)
+
+ENDPOINT = "https://translate.googleapis.com/translate_a/single"
+TIMEOUT  = 15
+MAX_WORKERS = 10  # 并发 AI 翻译线程数
+HDR      = {"User-Agent": "Mozilla/5.0"}
+
+# ============================================================
+#  PO 解析 / 写入（同之前）
+# ============================================================
+
+def strip_po_string(s):
+    t = s.strip()
+    if t.startswith('"') and t.endswith('"'):
+        t = t[1:-1]
+    return t.replace("\\n","\n").replace("\\t","\t").replace('\\"','"').replace("\\\\","\\")
+
+def escape_po(s):
+    return s.replace("\\","\\\\").replace('"','\\"').replace("\n","\\n").replace("\t","\\t")
+
+def po_quote(s):
+    return '"'+escape_po(s)+'"'
+
+def read_continuation(f):
+    result=""
+    while True:
+        pos=f.tell(); line=f.readline()
+        if not line: break
+        s=line.strip()
+        if s.startswith('"'): result+=strip_po_string(s)
+        else: f.seek(pos); break
+    return result
+
+def parse_po(file_path):
+    entries=[]; header=""; contexts=[]  # contexts: 每个条目的 #: 注释行内容（用于语境匹配）
+    with open(file_path,"r",encoding="utf-8") as f: raw=f.read()
+    first=raw.find("\nmsgctxt ")
+    if first==-1: first=raw.find("\nmsgid ")
+    if first>0: header=raw[:first+1]
+    elif first==-1: header=raw
+    in_header=True; cur_ctx=cur_msgid=cur_msgstr=""; cur_ctxx=""
+    collecting_msgid=collecting_msgstr=False
+    with open(file_path,"r",encoding="utf-8") as f:
+        while True:
+            line=f.readline()
+            if not line: break
+            if line.startswith("#:"):
+                cur_ctxx += line.strip() + "\n"
+                continue
+            if line.startswith("#"): continue
+            if line.startswith("msgctxt "):
+                if not in_header and cur_msgid!="":
+                    entries.append((cur_ctx,cur_msgid,cur_msgstr)); contexts.append(cur_ctxx); cur_ctxx=""
+                cur_ctx=strip_po_string(line[8:]); collecting_msgid=collecting_msgstr=False
+            elif line.startswith("msgid "):
+                val=strip_po_string(line[6:])
+                if in_header and val=="":
+                    while True:
+                        ll=f.readline()
+                        if not ll or not (ll.strip().startswith('"') and ll.strip()!='""'): break
+                    in_header=False; continue
+                in_header=False; cur_msgid=val+read_continuation(f)
+                collecting_msgid=True; collecting_msgstr=False
+            elif line.startswith("msgstr "):
+                cur_msgstr=strip_po_string(line[7:])+read_continuation(f)
+                collecting_msgid=False; collecting_msgstr=True
+            elif line.strip().startswith('"'):
+                cont=strip_po_string(line)
+                if collecting_msgid: cur_msgid+=cont
+                elif collecting_msgstr: cur_msgstr+=cont
+            else:
+                if not in_header and collecting_msgstr:
+                    entries.append((cur_ctx,cur_msgid,cur_msgstr)); contexts.append(cur_ctxx)
+                    cur_msgid=""; cur_ctxx=""
+                collecting_msgid=collecting_msgstr=False
+    if not in_header and collecting_msgstr and cur_msgid!="":
+        entries.append((cur_ctx,cur_msgid,cur_msgstr)); contexts.append(cur_ctxx)
+    return entries,header,contexts
+
+def _find_line_end(raw,pos):
+    nl=raw.find("\n",pos); return len(raw) if nl==-1 else nl+1
+
+def _build_po_entry(prefix,text):
+    if text=="": return prefix+' ""\n'
+    tok=text.split("\n")
+    if len(tok)<=1: return prefix+" "+po_quote(text)+"\n"
+    r=prefix+" "+po_quote(tok[0])+"\n"
+    for t in tok[1:]: r+='"'+escape_po(t)+'"\n'
+    return r
+
+def replace_msgstr_inplace(file_path,entries,header):
+    with open(file_path,"r",encoding="utf-8") as f: raw=f.read()
+    result=header; scan_pos=len(header)-1
+    for ctx,mid,mstr in entries:
+        if not mid: continue
+        mid_pos=raw.find("\nmsgid ",scan_pos)
+        if mid_pos==-1: break
+        mid_pos+=1; result+=raw[scan_pos:mid_pos]
+        mid_end=_find_line_end(raw,mid_pos); mid_next=mid_end
+        while mid_next<len(raw):
+            nl=raw.find("\n",mid_next)
+            if nl==-1: nl=len(raw)
+            if raw[mid_next:nl].strip().startswith('"'): mid_next=nl+1
+            else: break
+        mid_old=raw[mid_pos:mid_next]
+        mstr_pos=raw.find("msgstr ",mid_next)
+        if mstr_pos==-1 or mstr_pos>=len(raw): result+=raw[mid_pos:]; break
+        mstr_end=_find_line_end(raw,mstr_pos); mstr_next=mstr_end
+        while mstr_next<len(raw):
+            nl=raw.find("\n",mstr_next)
+            if nl==-1: nl=len(raw)
+            if raw[mstr_next:nl].strip().startswith('"'): mstr_next=nl+1
+            else: break
+        result+=mid_old; result+=_build_po_entry("msgstr",mstr); scan_pos=mstr_next
+    if scan_pos<len(raw): result+=raw[scan_pos:]
+    with open(file_path,"w",encoding="utf-8",newline="") as f: f.write(result)
+
+
+# ============================================================
+#  XLSX 规则加载：6 种规则类型
+# ============================================================
+
+def _read_shared_strings(zf):
+    """读取 xl/sharedStrings.xml，返回字符串列表"""
+    ss_file = 'xl/sharedStrings.xml'
+    if ss_file not in zf.namelist():
+        return []
+    xml_str = zf.read(ss_file).decode('utf-8')
+    root = ET.fromstring(xml_str)
+    ns = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+    strings = []
+    for si in root.findall('.//s:si', ns):
+        t_el = si.find('.//s:t', ns)
+        val = ""
+        if t_el is not None:
+            # 富文本 <r><t>...</t></r>，需要拼接
+            texts = si.findall('.//s:t', ns)
+            val = "".join(t.text or "" for t in texts)
+        strings.append(val)
+    return strings
+
+
+def _read_xlsx_sheet(zf, sheet_file, shared_strings):
+    """读取一个 sheet，返回 [{col_letter: value}, ...]"""
+    if sheet_file not in zf.namelist():
+        return []
+    xml_str = zf.read(sheet_file).decode('utf-8')
+    root = ET.fromstring(xml_str)
+    ns = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+    rows = []
+    for row in root.findall('.//s:row', ns):
+        cells = {}
+        for c in row.findall('s:c', ns):
+            ref = c.get('r', '')
+            col = ref.rstrip('0123456789')
+            val = ""
+            t = c.get('t', '')
+            if t == 's':
+                # shared string：v 中是索引号
+                v = c.find('s:v', ns)
+                if v is not None and v.text:
+                    try:
+                        idx = int(v.text)
+                        if 0 <= idx < len(shared_strings):
+                            val = shared_strings[idx]
+                    except ValueError:
+                        pass
+            elif t in ('inlineStr', 'str'):
+                # inline string
+                is_el = c.find('s:is', ns)
+                if is_el is not None:
+                    t_el = is_el.find('s:t', ns)
+                    if t_el is not None and t_el.text:
+                        val = t_el.text
+            else:
+                # 数值、布尔等直接取 v 文本
+                v = c.find('s:v', ns)
+                if v is not None and v.text:
+                    val = v.text
+            cells[col] = val.strip() if val else ""
+        rows.append(cells)
+    return rows
+
+
+def _find_po_column(rows, po_name):
+    """在 rows[1]（第2行标题行）中查找与 po_name 匹配的列字母（B~H）。
+    匹配规则：先精确匹配 → 去掉 .po 后缀匹配 → 都未找到返回 None"""
+    if len(rows) < 2:
+        return None
+    header = rows[1]
+    # 去掉 .po 后缀的变体
+    po_stem = po_name
+    if po_stem.lower().endswith(".po"):
+        po_stem = po_stem[:-3]
+    candidates = [po_name, po_stem]
+    for col in ['B', 'C', 'D', 'E', 'F', 'G', 'H']:
+        cell = header.get(col, '').strip()
+        if cell in candidates:
+            return col
+    return None
+
+
+def load_rules(xlsx_path, po_name):
+    """加载翻译规则，按 PO 文件名匹配第2行列名：
+    - 第1行：说明（跳过）
+    - 第2行：列标题 — A=原文Key, B~H=各PO文件名标识
+    - 第3行起：根据 po_name 匹配的列读取对应译文
+    - 》正则保护：全局生效（A列正则），不走列匹配
+    - 》使用说明 Sheet：跳过
+    """
+    default = {
+        "regex_protect": [],
+        "exact_match": {},
+        "context_match": [],
+        "prefix_rules": [],
+        "suffix_rules": [],
+        "substring": [],
+    }
+    if not xlsx_path or not os.path.isfile(xlsx_path):
+        return default
+
+    try:
+        zf = zipfile.ZipFile(xlsx_path, 'r')
+
+        # 读取共享字符串表（Excel 大多数文本存储在此）
+        shared_strings = _read_shared_strings(zf)
+        log("  SharedStrings count: %d" % len(shared_strings))
+
+        wb_xml = zf.read('xl/workbook.xml').decode('utf-8')
+        wb_root = ET.fromstring(wb_xml)
+        ns = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+        sheets = []
+        for sheet in wb_root.findall('.//s:sheet', ns):
+            name = sheet.get("name", "")
+            sid = sheet.get("sheetId", "")
+            sheet_file = "xl/worksheets/sheet%s.xml" % sid
+            sheets.append((name, sheet_file))
+
+        for sheet_name, sheet_file in sheets:
+            if sheet_name == "》使用说明":
+                continue
+
+            rows = _read_xlsx_sheet(zf, sheet_file, shared_strings)
+            po_col = _find_po_column(rows, po_name)  # 匹配PO文件对应的列
+
+            if sheet_name.startswith("》"):
+                # ---- 专用规则 Sheet ----
+                if "正则保护" in sheet_name:
+                    # 全局生效，始终读 A 列
+                    for r in rows[2:]:
+                        pat = r.get('A', '')
+                        if pat:
+                            try:
+                                default["regex_protect"].append(re.compile(pat))
+                                log("  regex_protect: %s" % pat)
+                            except Exception as e:
+                                log("  regex_protect ERROR: %s | %s" % (pat, str(e)))
+
+                elif "前后缀" in sheet_name and po_col:
+                    for r in rows[2:]:
+                        text = r.get('A', '')
+                        pos = r.get('B', '').strip()
+                        trans = r.get(po_col, '')
+                        if text and trans:
+                            if '前缀' in pos:
+                                default["prefix_rules"].append({"text": text, "trans": trans})
+                                log("  prefix: '%s' → '%s'" % (text, trans))
+                            elif '后缀' in pos:
+                                default["suffix_rules"].append({"text": text, "trans": trans})
+                                log("  suffix: '%s' → '%s'" % (text, trans))
+
+                elif "片段匹配" in sheet_name and po_col:
+                    for r in rows[2:]:
+                        src = r.get('A', '')
+                        dst = r.get(po_col, '')
+                        if src and dst:
+                            default["substring"].append({"src": src, "dst": dst})
+                            log("  substring: '%s' → '%s'" % (src, dst))
+
+                elif "精确匹配" in sheet_name and po_col:
+                    for r in rows[2:]:
+                        src = r.get('A', '')
+                        dst = r.get(po_col, '')
+                        if src and dst:
+                            default["exact_match"][src] = dst
+                            log("  exact_match: '%s' → '%s'" % (src, dst))
+
+                elif "语境翻译" in sheet_name and po_col:
+                    for r in rows[2:]:
+                        msgid = r.get('A', '')
+                        keyword = r.get('B', '')
+                        trans = r.get(po_col, '')
+                        if msgid and keyword and trans:
+                            default["context_match"].append({
+                                "msgid": msgid,
+                                "keyword": keyword,
+                                "trans": trans
+                            })
+                            log("  context: '%s' #:%s → '%s'" % (msgid, keyword, trans))
+            else:
+                # ---- 普通 Sheet：A=msgid, 匹配列=译文 ----
+                if po_col:
+                    for r in rows[2:]:
+                        src = r.get('A', '')
+                        dst = r.get(po_col, '')
+                        if src and dst:
+                            default["exact_match"][src] = dst
+                            log("  plain table '%s': '%s' → '%s'" % (sheet_name, src, dst))
+
+        zf.close()
+        return default
+
+    except Exception as e:
+        log("  load_rules ERROR: %s" % str(e))
+        traceback.print_exc(file=sys.stderr)
+        return default
+
+
+# ============================================================
+#  规则引擎：将规则应用到单个条目
+#  返回 (translated_text, source_type) 或 (None, None)
+#  执行顺序：正则保护（暂存）→ 精确匹配 → 语境 → 前后缀 → 片段
+# ============================================================
+
+def apply_rules(mid, ctx, ctxx, rules):
+    """
+    mid: msgid
+    ctx: msgctxt
+    ctxx: PO 原文中 #: 注释行的内容（用于语境匹配）
+    rules: load_rules() 返回的结构
+    返回 (translated_text, "rule") 或 (None, None)
+    """
+    if not rules:
+        return None, None
+
+    # 1. 精确匹配：整条 msgid 完全相等
+    if mid in rules.get("exact_match", {}):
+        return rules["exact_match"][mid], "rule"
+
+    # 2. 语境翻译：msgid + #: 关键词匹配
+    for cm in rules.get("context_match", []):
+        if cm["msgid"] == mid and cm["keyword"] in ctxx:
+            return cm["trans"], "rule"
+
+    # 3. 前后缀 + 片段（组合翻译）
+    result = mid
+
+    # 3a. 前缀替换
+    for pr in rules.get("prefix_rules", []):
+        if result.startswith(pr["text"]):
+            result = pr["trans"] + result[len(pr["text"]):]
+            break  # 只匹配第一个
+
+    # 3b. 后缀替换
+    for sr in rules.get("suffix_rules", []):
+        if result.endswith(sr["text"]):
+            result = result[:-len(sr["text"])] + sr["trans"]
+            break  # 只匹配第一个
+
+    # 3c. 片段替换
+    for sub in rules.get("substring", []):
+        result = result.replace(sub["src"], sub["dst"])
+
+    if result != mid:
+        return result, "rule"
+
+    return None, None
+
+
+# ============================================================
+#  AI 翻译前：用正则保护要保留的部分
+# ============================================================
+
+def protect_for_ai(mid, rules):
+    """返回 (protected_text, placeholders_dict)
+    protected_text 中，正则匹配的部分被替换为 __PO_PROTECT_N__ 占位符
+    翻译后再用 restore_from_protection 还原
+    """
+    if not rules or not rules.get("regex_protect"):
+        return mid, {}
+
+    placeholders = {}
+    counter = [0]  # 用列表包装，避免闭包 nonlocal 问题
+    for pat in rules["regex_protect"]:
+        def _replacer(m, _pat=pat):
+            key = "__PO_PROTECT_%d__" % counter[0]
+            placeholders[key] = m.group(0)
+            counter[0] += 1
+            return key
+        mid = pat.sub(_replacer, mid)
+
+    return mid, placeholders
+
+def restore_from_protection(text, placeholders):
+    """将占位符还原为原始文本"""
+    if not placeholders:
+        return text
+    for key, val in placeholders.items():
+        text = text.replace(key, val)
+    return text
+
+
+# ============================================================
+#  翻译记忆读取
+# ============================================================
+
+def read_memory(memory_path):
+    if not os.path.isfile(memory_path):
+        log("  Memory file not found: %s" % memory_path)
+        return {}
+    try:
+        with open(memory_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # 只取 count>=2 的条目
+        result = {}
+        for k, v in data.items():
+            if isinstance(v, dict) and v.get("count", 0) >= 2:
+                text = v.get("text", "")
+                if text:
+                    result[k] = text
+        log("  Loaded %d memories (count>=2) from %s" % (len(result), memory_path))
+        return result
+    except Exception as e:
+        log("  Memory read ERROR: %s" % str(e))
+        return {}
+
+
+# ============================================================
+#  AI 翻译
+# ============================================================
+
+def translate_one(text):
+    try:
+        q = urllib.parse.quote(text.encode("utf-8"))
+        url = ENDPOINT + "?client=gtx&dt=t&sl=%s&tl=%s&q=%s" % (
+            urllib.parse.quote(src_lang), urllib.parse.quote(target_lang), q
+        )
+        req = urllib.request.Request(url, headers=HDR, method="GET")
+        r = urllib.request.urlopen(req, timeout=TIMEOUT)
+        body = r.read().decode(errors="replace")
+        data = json.loads(body)
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
+            parts = []
+            for seg in data[0]:
+                if isinstance(seg, list) and len(seg) > 0:
+                    parts.append(str(seg[0]))
+            result = "".join(parts)
+            if result:
+                return result
+    except Exception as e:
+        log("  translate_one ERROR: %s | text=%s" % (str(e), text[:60]))
+    return ""
+
+def write_progress(done, total, current):
+    with open(progress_path, "w", encoding="utf-8") as f:
+        json.dump({"done": done, "total": total, "current": current}, f)
+
+
+# ============================================================
+#  主流程：规则 → 记忆 → AI
+# ============================================================
+
+try:
+    log("Parsing PO file...")
+    entries, header, contexts = parse_po(po_path)
+    total = len(entries)
+    log("Parsed %d entries, header len=%d" % (total, len(header)))
+
+    # 找出所有空 msgstr 的条目
+    pending = []
+    for i, (ctx, mid, mstr) in enumerate(entries):
+        if mstr == "" and mid != "":
+            pending.append(i)
+
+    log("Pending (empty msgstr): %d" % len(pending))
+
+    if not pending:
+        write_progress(0, 0, "")
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump({"ok": True, "translated": 0, "total": total, "sources": {}}, f)
+        print(json.dumps({"ok": True, "translated": 0, "total": total}))
+        sys.exit(0)
+
+    # ---- 加载规则和记忆 ----
+    rules = None
+    memory = {}
+    if project_path:
+        po_basename = os.path.splitext(os.path.basename(po_path))[0]
+        rules_xlsx = os.path.join(project_path, "翻译规则.xlsx")
+        memory_json = os.path.join(project_path, "翻译记忆", "translate_memory.json")
+        log("Loading rules from: %s (po=%s)" % (rules_xlsx, po_basename))
+        rules = load_rules(rules_xlsx, po_basename)
+        log("Loading memory from: %s" % memory_json)
+        memory = read_memory(memory_json)
+    else:
+        log("No project_path, skipping rules and memory")
+
+    # ---- 主翻译循环：规则 → 记忆 → AI（正则保护包装 AI） ----
+    pending_total = len(pending)
+    write_progress(0, pending_total, "start")
+
+    sources = {}       # {entry_index: "rule"|"memory"|"ai"}
+    success_count = 0
+    done = 0
+    i = 0
+
+    while i < pending_total:
+        batch_end = min(i + batch_size, pending_total)
+
+        # ---- 阶段1：规则 + 记忆（同步，很快） ----
+        ai_tasks = []  # [(idx, protected_mid, placeholders)]
+        for j in range(i, batch_end):
+            idx = pending[j]
+            ctx, mid, mstr = entries[idx]
+            ctxx = contexts[idx] if idx < len(contexts) else ""
+            result = ""
+
+            # 1) 规则引擎
+            if rules:
+                rule_result, _rule_src = apply_rules(mid, ctx, ctxx, rules)
+                if rule_result:
+                    result = rule_result
+                    sources[str(idx)] = "rule"
+                    log("  [%d] RULE: '%s' → '%s'" % (idx, mid, result))
+
+            # 2) 翻译记忆（规则未命中时）
+            if not result and mid in memory:
+                result = memory[mid]
+                sources[str(idx)] = "memory"
+                log("  [%d] MEMORY: '%s' → '%s'" % (idx, mid, result))
+
+            if result:
+                entries[idx] = (ctx, mid, result)
+                success_count += 1
+                done += 1
+            else:
+                # 需要 AI 翻译：准备保护后的文本
+                protected_mid, placeholders = protect_for_ai(mid, rules) if rules else (mid, {})
+                ai_tasks.append((idx, mid, protected_mid, placeholders))
+
+        # ---- 阶段2：AI 翻译（并发） ----
+        if ai_tasks:
+            log("  Batch [%d:%d] AI tasks: %d, spawning %d workers..." % (i, batch_end, len(ai_tasks), min(MAX_WORKERS, len(ai_tasks))))
+            with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(ai_tasks))) as executor:
+                future_map = {}
+                for idx, mid, protected_mid, placeholders in ai_tasks:
+                    future = executor.submit(translate_one, protected_mid)
+                    future_map[future] = (idx, mid, placeholders)
+
+                for future in as_completed(future_map):
+                    idx, mid, placeholders = future_map[future]
+                    ai_result = future.result()
+                    if ai_result:
+                        result = restore_from_protection(ai_result, placeholders)
+                        entries[idx] = (entries[idx][0], mid, result)
+                        sources[str(idx)] = "ai"
+                        success_count += 1
+                        log("  [%d] AI: '%s' → '%s'" % (idx, mid, result))
+                    done += 1
+
+        i = batch_end
+        log("Batch done: %d/%d, success: %d" % (i, pending_total, success_count))
+        replace_msgstr_inplace(po_path, entries, header)
+        write_progress(i, pending_total, entries[pending[batch_end - 1]][1][:40] if batch_end > 0 else "")
+
+    write_progress(pending_total, pending_total, "done")
+
+    log("All done. Translated %d/%d. Sources: rule=%d memory=%d ai=%d" % (
+        success_count,
+        sum(1 for v in sources.values() if v == "rule"),
+        sum(1 for v in sources.values() if v == "memory"),
+        sum(1 for v in sources.values() if v == "ai")
+    ))
+
+    final_result = {"ok": True, "translated": success_count, "total": total, "sources": sources}
+    with open(result_path, "w", encoding="utf-8") as f:
+        json.dump(final_result, f)
+
+    print(json.dumps(final_result))
+
+except Exception as e:
+    log("FATAL ERROR: %s" % str(e))
+    traceback.print_exc(file=sys.stderr)
+    with open(result_path, "w", encoding="utf-8") as f:
+        json.dump({"ok": False, "translated": 0, "total": 0, "message": str(e)}, f)
+    print(json.dumps({"ok": False, "translated": 0, "total": 0, "message": str(e)}))

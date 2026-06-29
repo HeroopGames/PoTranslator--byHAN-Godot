@@ -1,0 +1,52 @@
+# 日文 Japanese translation - 模板2.
+# Fill out your copyright notice in the Description page of Project Settings.
+# 
+msgid ""
+msgstr ""
+
+#. Key:	T2Z9Y8X7W6V5U4T3S2R1Q0P9O8N7M6
+#. SourceLocation:	/Game/模板2/模板2菜单.模板2Menu_C:已翻译条目 [Script Bytecode]
+#: /Game/模板2/模板2菜单.模板2Menu_C:已翻译条目 [Script Bytecode]
+
+
+
+
+
+msgctxt ",T2Z9Y8X7W6V5U4T3S2R1Q0P9O8N7M6"
+msgid "开始游戏"
+msgstr "ゲームを開始する"
+
+#. Key:	T2Y8X7W6V5U4T3S2R1Q0P9O8N7M6L5
+#. SourceLocation:	/Game/模板2/模板2菜单.模板2Menu_C:未翻译条目 [Script Bytecode]
+#: /Game/模板2/模板2菜单.模板2Menu_C:未翻译条目 [Script Bytecode]
+msgctxt ",T2Y8X7W6V5U4T3S2R1Q0P9O8N7M6L5"
+msgid "读取存档"
+msgstr "アーカイブを読む"
+
+#. Key:	T2X7W6V5U4T3S2R1Q0P9O8N7M6L5K4
+#. SourceLocation:	/Game/模板2/模板2菜单.模板2Menu_C:已翻译条目 [Script Bytecode]
+#: /Game/模板2/模板2菜单.模板2Menu_C:已翻译条目 [Script Bytecode]
+msgctxt ",T2X7W6V5U4T3S2R1Q0P9O8N7M6L5K4"
+msgid "音量设置"
+msgstr "音量設定"
+
+#. Key:	T2W6V5U4T3S2R1Q0P9O8N7M6L5K4J3
+#. SourceLocation:	/Game/模板2/模板2菜单.模板2Menu_C:未翻译含占位符条目 [Script Bytecode]
+#: /Game/模板2/模板2菜单.模板2Menu_C:未翻译含占位符条目 [Script Bytecode]
+msgctxt ",T2W6V5U4T3S2R1Q0P9O8N7M6L5K4J3"
+msgid "第 {0} 关"
+msgstr "レベル {0}"
+
+#. Key:	T2V5U4T3S2R1Q0P9O8N7M6L5K4J3I2
+#. SourceLocation:	/Game/模板2/模板2菜单.模板2Menu_C:已翻译条目 [Script Bytecode]
+#: /Game/模板2/模板2菜单.模板2Menu_C:已翻译条目 [Script Bytecode]
+msgctxt ",T2V5U4T3S2R1Q0P9O8N7M6L5K4J3I2"
+msgid "自动保存中…"
+msgstr "自動的に保存されます…"
+
+#. Key:	T2U4T3S2R1Q0P9O8N7M6L5K4J3I2H1
+#. SourceLocation:	/Game/模板2/模板2菜单.模板2Menu_C:未翻译条目 [Script Bytecode]
+#: /Game/模板2/模板2菜单.模板2Menu_C:未翻译条目 [Script Bytecode]
+msgctxt ",T2U4T3S2R1Q0P9O8N7M6L5K4J3I2H1"
+msgid "购买确认"
+msgstr "購入確認"

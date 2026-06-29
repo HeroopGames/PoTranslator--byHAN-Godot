@@ -1,0 +1,99 @@
+[gd_scene format=3 uid="uid://b4say0p3k8e1n"]
+
+[ext_resource type="Script" uid="uid://c1l8f4053yjh1" path="res://Main/Translate/PO/po_entry.gd" id="1_script"]
+[ext_resource type="Shader" path="res://Main/Translate/PO/blur_bg.gdshader" id="2_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_blur"]
+shader = ExtResource("2_shader")
+shader_parameter/blur_radius = 4.0
+
+[node name="PoEntry" type="Control" unique_id=857691927]
+layout_mode = 3
+anchors_preset = 0
+size_flags_horizontal = 3
+clip_contents = true
+script = ExtResource("1_script")
+
+[node name="BackBufferCopy" type="BackBufferCopy" parent="." unique_id=2764318912]
+copy_mode = 1
+rect = Rect2(0, 0, 400, 44)
+
+[node name="BlurBg" type="ColorRect" parent="." unique_id=2138475621]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0.06, 0.02, 1)
+material = SubResource("ShaderMaterial_blur")
+
+[node name="Row" type="HBoxContainer" parent="." unique_id=800020677]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_bottom = -6.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 10
+
+[node name="SrcLabel" type="Label" parent="Row" unique_id=247320792]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+mouse_filter = 0
+theme_override_colors/font_color = Color(0.6, 0.85, 0.7, 1)
+theme_override_font_sizes/font_size = 14
+autowrap_mode = 3
+vertical_alignment = 1
+
+[node name="SrcEdit" type="TextEdit" parent="Row" unique_id=247320791]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_colors/font_color = Color(0.6, 0.85, 0.7, 1)
+theme_override_font_sizes/font_size = 14
+wrap_mode = 2
+
+[node name="SepLabel" type="Label" parent="Row" unique_id=811141319]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 0.5, 0.35, 0.6)
+theme_override_font_sizes/font_size = 14
+text = "→"
+
+[node name="DstLabel" type="Label" parent="Row" unique_id=1076014667]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+mouse_filter = 0
+theme_override_colors/font_color = Color(0.85, 0.35, 0.35, 1)
+theme_override_font_sizes/font_size = 14
+autowrap_mode = 3
+vertical_alignment = 1
+
+[node name="DstEdit" type="TextEdit" parent="Row" unique_id=1076014666]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_colors/font_color = Color(0.85, 0.35, 0.35, 1)
+theme_override_font_sizes/font_size = 14
+wrap_mode = 2
+
+[node name="Separator" type="HSeparator" parent="." unique_id=450212684]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -4.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[connection signal="focus_exited" from="Row/SrcEdit" to="." method="_on_src_focus_exited"]
+[connection signal="focus_exited" from="Row/DstEdit" to="." method="_on_dst_focus_exited"]
+[connection signal="gui_input" from="Row/SrcLabel" to="." method="_on_src_label_clicked"]
+[connection signal="gui_input" from="Row/DstLabel" to="." method="_on_dst_label_clicked"]

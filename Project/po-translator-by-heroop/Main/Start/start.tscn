@@ -1,0 +1,412 @@
+[gd_scene format=3 uid="uid://71o3hwjs51km"]
+
+[ext_resource type="PackedScene" uid="uid://c7x8k3n1m2p4q" path="res://digital_rain/digital_rain.tscn" id="1_rain"]
+[ext_resource type="Script" uid="uid://b5hqr3qg5l388" path="res://Main/Start/start.gd" id="2_script"]
+[ext_resource type="Shader" uid="uid://ghg30whcsjq5" path="res://Main/Start/scan_line.gdshader" id="3_scan_shader"]
+
+[sub_resource type="LabelSettings" id="LabelSettings_title"]
+font_size = 36
+font_color = Color(0.3, 1, 0.5, 1)
+outline_size = 2
+outline_color = Color(0, 0.15, 0, 1)
+
+[sub_resource type="ShaderMaterial" id="ScanMaterial"]
+shader = ExtResource("3_scan_shader")
+shader_parameter/scan_pos = 0.0
+shader_parameter/line_width = 0.012
+shader_parameter/glow_color = Color(0.3, 1, 0.5, 0.8)
+
+[sub_resource type="LabelSettings" id="LabelSettings_scan_title"]
+font_size = 24
+font_color = Color(0.7, 1, 0.8, 1)
+
+[sub_resource type="LabelSettings" id="LabelSettings_scan_item"]
+font_size = 18
+font_color = Color(0.5, 0.9, 0.65, 1)
+
+[sub_resource type="LabelSettings" id="LabelSettings_panel_title"]
+font_size = 28
+font_color = Color(0.3, 1, 0.5, 1)
+outline_size = 2
+outline_color = Color(0, 0.12, 0, 1)
+
+[sub_resource type="LabelSettings" id="LabelSettings_desc"]
+font_color = Color(0.7, 0.85, 0.75, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_command"]
+content_margin_left = 12.0
+content_margin_top = 8.0
+content_margin_right = 12.0
+content_margin_bottom = 8.0
+bg_color = Color(0, 0.08, 0, 0.85)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.2, 0.5, 0.3, 0.6)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="LabelSettings" id="LabelSettings_command"]
+font_size = 15
+font_color = Color(0.3, 1, 0.5, 1)
+
+[node name="Start" type="Control" unique_id=500500207]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("2_script")
+
+[node name="DigitalRainBg" parent="." unique_id=1644333543 instance=ExtResource("1_rain")]
+layout_mode = 1
+mouse_filter = 2
+
+[node name="TitleLabel" type="Label" parent="." unique_id=2110104210]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -30.0
+offset_right = 200.0
+offset_bottom = 30.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "PoTranslator by HAN"
+label_settings = SubResource("LabelSettings_title")
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ScanningPanel" type="Control" parent="." unique_id=1472307495]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ScanOverlay" type="ColorRect" parent="ScanningPanel" unique_id=1470845087]
+material = SubResource("ScanMaterial")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0, 0, 0)
+
+[node name="ScanInfo" type="VBoxContainer" parent="ScanningPanel" unique_id=1991247664]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -160.0
+offset_top = -80.0
+offset_right = 160.0
+offset_bottom = 80.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="StatusLabel" type="Label" parent="ScanningPanel/ScanInfo" unique_id=1275517707]
+layout_mode = 2
+text = "检测环境"
+label_settings = SubResource("LabelSettings_scan_title")
+horizontal_alignment = 1
+
+[node name="PythonRow" type="HBoxContainer" parent="ScanningPanel/ScanInfo" unique_id=589608938]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ItemName" type="Label" parent="ScanningPanel/ScanInfo/PythonRow" unique_id=2071155424]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Python 环境"
+label_settings = SubResource("LabelSettings_scan_item")
+horizontal_alignment = 2
+
+[node name="StatusIcon" type="Label" parent="ScanningPanel/ScanInfo/PythonRow" unique_id=996134374]
+layout_mode = 2
+label_settings = SubResource("LabelSettings_scan_item")
+horizontal_alignment = 2
+
+[node name="OpenpyxlRow" type="HBoxContainer" parent="ScanningPanel/ScanInfo" unique_id=1353423154]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ItemName" type="Label" parent="ScanningPanel/ScanInfo/OpenpyxlRow" unique_id=410635523]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "openpyxl 模块"
+label_settings = SubResource("LabelSettings_scan_item")
+horizontal_alignment = 2
+
+[node name="StatusIcon" type="Label" parent="ScanningPanel/ScanInfo/OpenpyxlRow" unique_id=1172781113]
+layout_mode = 2
+label_settings = SubResource("LabelSettings_scan_item")
+horizontal_alignment = 2
+
+[node name="InstallPanel" type="Control" parent="." unique_id=1185142293]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="DimBg" type="ColorRect" parent="InstallPanel" unique_id=1704541625]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0.02, 0, 0.75)
+
+[node name="InstallBox" type="VBoxContainer" parent="InstallPanel" unique_id=540937341]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -260.0
+offset_top = -150.0
+offset_right = 260.0
+offset_bottom = 150.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 16
+
+[node name="InstallTitle" type="Label" parent="InstallPanel/InstallBox" unique_id=1965790176]
+layout_mode = 2
+text = "环境未就绪"
+label_settings = SubResource("LabelSettings_panel_title")
+horizontal_alignment = 1
+
+[node name="DescLabel" type="Label" parent="InstallPanel/InstallBox" unique_id=123754160]
+layout_mode = 2
+label_settings = SubResource("LabelSettings_desc")
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="CommandBg" type="Panel" parent="InstallPanel/InstallBox" unique_id=1635334670]
+layout_mode = 2
+theme_override_styles/panel = SubResource("StyleBox_command")
+
+[node name="CommandLabel" type="Label" parent="InstallPanel/InstallBox/CommandBg" unique_id=1522455240]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+label_settings = SubResource("LabelSettings_command")
+horizontal_alignment = 1
+
+[node name="BtnRow" type="HBoxContainer" parent="InstallPanel/InstallBox" unique_id=855009480]
+layout_mode = 2
+theme_override_constants/separation = 20
+alignment = 1
+
+[node name="RetryBtn" type="Button" parent="InstallPanel/InstallBox/BtnRow" unique_id=78784869]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_colors/font_color = Color(0.2, 1, 0.4, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 18
+text = "重新检测"
+
+[node name="ExitBtn" type="Button" parent="InstallPanel/InstallBox/BtnRow" unique_id=1870336306]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_colors/font_color = Color(0.8, 0.5, 0.5, 1)
+theme_override_colors/font_hover_color = Color(1, 0.7, 0.7, 1)
+theme_override_font_sizes/font_size = 18
+text = "退出"
+
+[node name="ProjectPanel" type="Control" parent="." unique_id=980542359]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="DimBg" type="ColorRect" parent="ProjectPanel" unique_id=1562260919]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0.02, 0, 0.75)
+
+[node name="ProjectBox" type="VBoxContainer" parent="ProjectPanel" unique_id=1569749925]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -200.0
+offset_top = -100.0
+offset_right = 200.0
+offset_bottom = 100.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 24
+
+[node name="WelcomeLabel" type="Label" parent="ProjectPanel/ProjectBox" unique_id=1835055242]
+layout_mode = 2
+text = "欢迎使用 PoTranslator by HAN"
+label_settings = SubResource("LabelSettings_panel_title")
+horizontal_alignment = 1
+
+[node name="BtnRow" type="HBoxContainer" parent="ProjectPanel/ProjectBox" unique_id=2041908354]
+layout_mode = 2
+theme_override_constants/separation = 20
+alignment = 1
+
+[node name="NewProjectBtn" type="Button" parent="ProjectPanel/ProjectBox/BtnRow" unique_id=1916952963]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_colors/font_color = Color(0.2, 1, 0.4, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 18
+text = "新建项目"
+
+[node name="OpenProjectBtn" type="Button" parent="ProjectPanel/ProjectBox/BtnRow" unique_id=2122169508]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_colors/font_color = Color(0.2, 1, 0.4, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 18
+text = "打开项目"
+
+[node name="TopRightBtns" type="HBoxContainer" parent="." unique_id=894561230]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = -100.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = 48.0
+grow_horizontal = 0
+grow_vertical = 2
+theme_override_constants/separation = 8
+alignment = 2
+
+[node name="HelpBtn" type="Button" parent="TopRightBtns" unique_id=894561231]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 20
+text = "  ?  "
+
+[node name="CopyrightBtn" type="Button" parent="TopRightBtns" unique_id=894561232]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.8, 0.3, 1)
+theme_override_colors/font_hover_color = Color(1, 0.9, 0.5, 1)
+theme_override_font_sizes/font_size = 20
+text = "  !  "
+
+[node name="InfoPopup" type="Control" parent="." unique_id=894561233]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+
+[node name="PopupDimBg" type="ColorRect" parent="InfoPopup" unique_id=894561234]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0.02, 0, 0.8)
+
+[node name="PopupBox" type="VBoxContainer" parent="InfoPopup" unique_id=894561235]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -280.0
+offset_top = -220.0
+offset_right = 280.0
+offset_bottom = 220.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="PopupTitle" type="Label" parent="InfoPopup/PopupBox" unique_id=894561236]
+layout_mode = 2
+label_settings = SubResource("LabelSettings_panel_title")
+horizontal_alignment = 1
+
+[node name="PopupScroll" type="ScrollContainer" parent="InfoPopup/PopupBox" unique_id=894561237]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="PopupContent" type="Label" parent="InfoPopup/PopupBox/PopupScroll" unique_id=894561238]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+label_settings = SubResource("LabelSettings_desc")
+autowrap_mode = 3
+
+[node name="PopupCloseBtn" type="Button" parent="InfoPopup/PopupBox" unique_id=894561239]
+layout_mode = 2
+size_flags_horizontal = 4
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 16
+text = "关闭"
+
+[node name="EditorSkipLabel" type="Label" parent="." unique_id=518141561]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -300.0
+offset_top = -40.0
+offset_right = 300.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 0.4)
+theme_override_font_sizes/font_size = 14
+text = "鼠标点击任意位置跳过环境检测（仅编辑器内可用）"
+horizontal_alignment = 1
+
+[connection signal="pressed" from="InstallPanel/InstallBox/BtnRow/RetryBtn" to="." method="_on_retry_pressed"]
+[connection signal="pressed" from="InstallPanel/InstallBox/BtnRow/ExitBtn" to="." method="_on_exit_pressed"]
+[connection signal="pressed" from="ProjectPanel/ProjectBox/BtnRow/NewProjectBtn" to="." method="_on_new_project_pressed"]
+[connection signal="pressed" from="ProjectPanel/ProjectBox/BtnRow/OpenProjectBtn" to="." method="_on_open_project_pressed"]
+[connection signal="pressed" from="TopRightBtns/HelpBtn" to="." method="_on_help_pressed"]
+[connection signal="pressed" from="TopRightBtns/CopyrightBtn" to="." method="_on_copyright_pressed"]
+[connection signal="pressed" from="InfoPopup/PopupBox/PopupCloseBtn" to="." method="_on_popup_close_pressed"]

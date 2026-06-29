@@ -1,0 +1,49 @@
+# 英文 English translation.
+# Fill out your copyright notice in the Description page of Project Settings.
+# 
+msgid ""
+msgstr ""
+
+#. Key:	A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6
+#. SourceLocation:	/Game/示例/翻译示例.示例_C:已翻译条目 [Script Bytecode]
+#: /Game/示例/翻译示例.示例_C:已翻译条目 [Script Bytecode]
+
+
+msgctxt ",A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6"
+msgid "物品已售出"
+msgstr "Item sold"
+
+#. Key:	B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7
+#. SourceLocation:	/Game/示例/翻译示例.示例_C:未翻译条目 [Script Bytecode]
+#: /Game/示例/翻译示例.示例_C:未翻译条目 [Script Bytecode]
+msgctxt ",B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7"
+msgid "请输入名称"
+msgstr "Please enter name"
+
+#. Key:	C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8
+#. SourceLocation:	/Game/示例/翻译示例.示例_C:已翻译条目 [Script Bytecode]
+#: /Game/示例/翻译示例.示例_C:已翻译条目 [Script Bytecode]
+msgctxt ",C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8"
+msgid "网络连接超时"
+msgstr "Network connection timed out"
+
+#. Key:	D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9
+#. SourceLocation:	/Game/示例/翻译示例.示例_C:未翻译含占位符条目 [Script Bytecode]
+#: /Game/示例/翻译示例.示例_C:未翻译含占位符条目 [Script Bytecode]
+msgctxt ",D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9"
+msgid "等级 {0} 解锁"
+msgstr "Level {0} Unlocked"
+
+#. Key:	E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0
+#. SourceLocation:	/Game/示例/翻译示例.示例_C:已翻译条目 [Script Bytecode]
+#: /Game/示例/翻译示例.示例_C:已翻译条目 [Script Bytecode]
+msgctxt ",E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0"
+msgid "体力不足"
+msgstr "Lack of physical strength"
+
+#. Key:	F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1
+#. SourceLocation:	/Game/示例/翻译示例.示例_C:未翻译条目 [Script Bytecode]
+#: /Game/示例/翻译示例.示例_C:未翻译条目 [Script Bytecode]
+msgctxt ",F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1"
+msgid "是否退出游戏？"
+msgstr "Exit the game?"

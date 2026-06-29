@@ -1,0 +1,463 @@
+[gd_scene format=3 uid="uid://dt8x3p1m5q7rn"]
+
+[ext_resource type="Script" uid="uid://c1gvsnfh4aa08" path="res://Main/Translate/translate.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://c7x8k3n1m2p4q" path="res://digital_rain/digital_rain.tscn" id="2_rain"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_option_normal"]
+content_margin_left = 10.0
+content_margin_top = 4.0
+content_margin_right = 10.0
+content_margin_bottom = 4.0
+bg_color = Color(0, 0.06, 0, 0.7)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.2, 0.5, 0.3, 0.5)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_option_hover"]
+content_margin_left = 10.0
+content_margin_top = 4.0
+content_margin_right = 10.0
+content_margin_bottom = 4.0
+bg_color = Color(0, 0.1, 0, 0.85)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.3, 0.6, 0.4, 0.7)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_close_normal"]
+content_margin_left = 8.0
+content_margin_top = 4.0
+content_margin_right = 8.0
+content_margin_bottom = 4.0
+bg_color = Color(0, 0.04, 0, 0.6)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.3, 0.15, 0.15, 0.4)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBox_panel"]
+bg_color = Color(0, 0.04, 0, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.15, 0.35, 0.2, 0.5)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
+[node name="Translate" type="Control" unique_id=1846527759]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="DigitalRainBg" parent="." unique_id=896199766 instance=ExtResource("2_rain")]
+layout_mode = 1
+
+[node name="HttpRequest" type="HTTPRequest" parent="." unique_id=1928374650]
+
+[node name="TopBar" type="HBoxContainer" parent="." unique_id=1864710782]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 16.0
+offset_top = 12.0
+offset_right = -16.0
+grow_horizontal = 2
+
+[node name="ApiOption" type="OptionButton" parent="TopBar" unique_id=1382314772]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
+theme_override_colors/font_pressed_color = Color(0.7, 1, 0.85, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 15
+theme_override_styles/normal = SubResource("StyleBox_option_normal")
+theme_override_styles/pressed = SubResource("StyleBox_option_normal")
+theme_override_styles/hover = SubResource("StyleBox_option_hover")
+
+[node name="ApiCheckBtn" type="Button" parent="TopBar" unique_id=-465495790]
+custom_minimum_size = Vector2(48, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 0.65)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("StyleBox_option_normal")
+theme_override_styles/hover = SubResource("StyleBox_option_hover")
+text = "检测API"
+
+[node name="SrcLangOption" type="OptionButton" parent="TopBar" unique_id=2109384756]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
+theme_override_colors/font_pressed_color = Color(0.7, 1, 0.85, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 15
+theme_override_styles/normal = SubResource("StyleBox_option_normal")
+theme_override_styles/pressed = SubResource("StyleBox_option_normal")
+theme_override_styles/hover = SubResource("StyleBox_option_hover")
+
+[node name="TargetLangOption" type="OptionButton" parent="TopBar" unique_id=-1203139932]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
+theme_override_colors/font_pressed_color = Color(0.7, 1, 0.85, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 15
+theme_override_styles/normal = SubResource("StyleBox_option_normal")
+theme_override_styles/pressed = SubResource("StyleBox_option_normal")
+theme_override_styles/hover = SubResource("StyleBox_option_hover")
+
+[node name="Spacer" type="Control" parent="TopBar" unique_id=318985915]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CloseBtn" type="Button" parent="TopBar" unique_id=1436385548]
+custom_minimum_size = Vector2(72, 72)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.4, 0.4, 0.85)
+theme_override_colors/font_pressed_color = Color(1, 0.7, 0.7, 1)
+theme_override_colors/font_hover_color = Color(1, 0.5, 0.5, 1)
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleBox_close_normal")
+theme_override_styles/hover = SubResource("StyleBox_close_normal")
+text = "✕"
+flat = true
+
+[node name="ConfigBtn" type="Button" parent="." unique_id=1216130717]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = -40.0
+offset_bottom = -8.0
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 0.75)
+theme_override_colors/font_pressed_color = Color(0.7, 1, 0.85, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 14
+theme_override_styles/normal = SubResource("StyleBox_option_normal")
+theme_override_styles/hover = SubResource("StyleBox_option_hover")
+text = "配置"
+
+[node name="MainPanel" type="Panel" parent="." unique_id=1800508280]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -420.0
+offset_top = -240.0
+offset_right = 420.0
+offset_bottom = 240.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBox_panel")
+
+[node name="TabBar" type="HBoxContainer" parent="MainPanel" unique_id=1317836560]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 4.0
+offset_top = 4.0
+offset_right = -4.0
+grow_horizontal = 2
+theme_override_constants/separation = 2
+
+[node name="SearchEdit" type="LineEdit" parent="MainPanel" unique_id=-2096493645]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 4.0
+offset_top = 34.0
+offset_right = -4.0
+offset_bottom = 62.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
+theme_override_colors/font_placeholder_color = Color(0.3, 1, 0.5, 0.35)
+theme_override_font_sizes/font_size = 14
+placeholder_text = "部分匹配：搜索 msgid 或 msgstr 按回车筛选，输入为空则不筛选"
+caret_blink = true
+caret_blink_interval = 0.5
+
+[node name="ExactSearchEdit" type="LineEdit" parent="MainPanel" unique_id=-2096493646]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 4.0
+offset_top = 64.0
+offset_right = -4.0
+offset_bottom = 92.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.3, 1)
+theme_override_colors/font_placeholder_color = Color(1, 0.85, 0.3, 0.35)
+theme_override_font_sizes/font_size = 14
+placeholder_text = "完全匹配：输入内容与 msgid 或 msgstr 完全相同时筛选，为空则不筛选"
+caret_blink = true
+caret_blink_interval = 0.5
+
+[node name="FilterScroll" type="ScrollContainer" parent="MainPanel" unique_id=-568808392]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 4.0
+offset_top = 94.0
+offset_right = -4.0
+offset_bottom = 120.0
+grow_horizontal = 2
+
+[node name="FilterCheckRow" type="HBoxContainer" parent="MainPanel/FilterScroll" unique_id=-111111111]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="ChkAll" type="CheckBox" parent="MainPanel/FilterScroll/FilterCheckRow" unique_id=-987654321]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 13
+button_pressed = true
+text = "全部"
+
+[node name="ChkAI" type="CheckBox" parent="MainPanel/FilterScroll/FilterCheckRow" unique_id=617890005]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.6, 1, 1)
+theme_override_colors/font_pressed_color = Color(0.35, 0.6, 1, 1)
+theme_override_colors/font_hover_color = Color(0.35, 0.6, 1, 1)
+theme_override_font_sizes/font_size = 13
+button_pressed = true
+text = "AI"
+
+[node name="ChkManual" type="CheckBox" parent="MainPanel/FilterScroll/FilterCheckRow" unique_id=1623504738]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
+theme_override_colors/font_pressed_color = Color(0.3, 1, 0.5, 1)
+theme_override_colors/font_hover_color = Color(0.3, 1, 0.5, 1)
+theme_override_font_sizes/font_size = 13
+button_pressed = true
+text = "手动"
+
+[node name="ChkRule" type="CheckBox" parent="MainPanel/FilterScroll/FilterCheckRow" unique_id=1898879909]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.3, 1)
+theme_override_colors/font_pressed_color = Color(1, 0.85, 0.3, 1)
+theme_override_colors/font_hover_color = Color(1, 0.85, 0.3, 1)
+theme_override_font_sizes/font_size = 13
+button_pressed = true
+text = "规则"
+
+[node name="ChkMemory" type="CheckBox" parent="MainPanel/FilterScroll/FilterCheckRow" unique_id=-1385118669]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.35, 1, 1)
+theme_override_colors/font_pressed_color = Color(0.7, 0.35, 1, 1)
+theme_override_colors/font_hover_color = Color(0.7, 0.35, 1, 1)
+theme_override_font_sizes/font_size = 13
+button_pressed = true
+text = "记忆"
+
+[node name="ChkUntranslated" type="CheckBox" parent="MainPanel/FilterScroll/FilterCheckRow" unique_id=433552064]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.35, 0.35, 1)
+theme_override_colors/font_pressed_color = Color(0.85, 0.35, 0.35, 1)
+theme_override_colors/font_hover_color = Color(0.85, 0.35, 0.35, 1)
+theme_override_font_sizes/font_size = 13
+button_pressed = true
+text = "未翻译"
+
+[node name="ChkEmpty" type="CheckBox" parent="MainPanel/FilterScroll/FilterCheckRow" unique_id=988950164]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
+theme_override_colors/font_pressed_color = Color(0.3, 1, 0.5, 1)
+theme_override_colors/font_hover_color = Color(0.3, 1, 0.5, 1)
+theme_override_font_sizes/font_size = 13
+button_pressed = true
+text = "空"
+
+[node name="ContentScroll" type="ScrollContainer" parent="MainPanel" unique_id=1301861706]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 4.0
+offset_top = 120.0
+offset_right = -4.0
+offset_bottom = -4.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PoListContainer" type="Control" parent="MainPanel/ContentScroll" unique_id=486555511]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="LoadingOverlay" type="ColorRect" parent="." unique_id=1570525000]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0, 0.01, 0, 0.88)
+
+[node name="LoadingBox" type="VBoxContainer" parent="LoadingOverlay" unique_id=1577071325]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -150.0
+offset_top = -30.0
+offset_right = 150.0
+offset_bottom = 30.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 12
+
+[node name="LoadingLabel" type="Label" parent="LoadingOverlay/LoadingBox" unique_id=924761692]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
+theme_override_font_sizes/font_size = 18
+text = "正在加载 PO 文件..."
+horizontal_alignment = 1
+
+[node name="ProgressBar" type="ProgressBar" parent="LoadingOverlay/LoadingBox" unique_id=390053197]
+custom_minimum_size = Vector2(0, 24)
+layout_mode = 2
+size_flags_horizontal = 3
+max_value = 1.0
+show_percentage = false
+
+[node name="ClearMsgstrBtn" type="Button" parent="." unique_id=-1484491384]
+custom_minimum_size = Vector2(210, 0)
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 100.0
+offset_top = -40.0
+offset_bottom = -8.0
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.8, 0.4, 0.4, 0.75)
+theme_override_colors/font_pressed_color = Color(1, 0.7, 0.7, 1)
+theme_override_colors/font_hover_color = Color(1, 0.5, 0.5, 1)
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("StyleBox_close_normal")
+theme_override_styles/hover = SubResource("StyleBox_close_normal")
+text = "清空当前已筛选条目（长按1.5秒）"
+
+[node name="RefreshBtn" type="Button" parent="." unique_id=1649736680]
+custom_minimum_size = Vector2(72, 0)
+layout_mode = 1
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 314.0
+offset_top = -40.0
+offset_bottom = -8.0
+grow_vertical = 0
+theme_override_colors/font_color = Color(0.35, 0.6, 1, 0.75)
+theme_override_colors/font_pressed_color = Color(0.5, 1, 0.7, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 14
+theme_override_styles/normal = SubResource("StyleBox_option_normal")
+theme_override_styles/hover = SubResource("StyleBox_option_hover")
+text = "刷新"
+
+[node name="TranslateBtn" type="Button" parent="." unique_id=1755699250]
+custom_minimum_size = Vector2(144, 0)
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -160.0
+offset_top = -48.0
+offset_right = -16.0
+offset_bottom = -16.0
+grow_horizontal = 0
+grow_vertical = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 0.75)
+theme_override_colors/font_pressed_color = Color(0.7, 1, 0.85, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_colors/font_disabled_color = Color(0.3, 1, 0.5, 0.35)
+theme_override_font_sizes/font_size = 15
+theme_override_styles/normal = SubResource("StyleBox_option_normal")
+theme_override_styles/hover = SubResource("StyleBox_option_hover")
+theme_override_styles/disabled = SubResource("StyleBox_option_normal")
+disabled = true
+text = "一键翻译"
+
+[node name="TranslateProgressBox" type="Panel" parent="." unique_id=1680920327]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -300.0
+offset_top = -114.0
+offset_right = 300.0
+offset_bottom = -71.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_styles/panel = SubResource("StyleBox_option_normal")
+
+[node name="TranslateProgressVBox" type="VBoxContainer" parent="TranslateProgressBox" unique_id=799714813]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 6.0
+offset_right = -8.0
+offset_bottom = -6.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 4
+alignment = 1
+
+[node name="TranslateProgressBar" type="ProgressBar" parent="TranslateProgressBox/TranslateProgressVBox" unique_id=117957779]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+size_flags_horizontal = 3
+max_value = 1.0
+show_percentage = false
+
+[node name="TranslateProgressLabel" type="Label" parent="TranslateProgressBox/TranslateProgressVBox" unique_id=1646110809]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 0.65)
+theme_override_font_sizes/font_size = 14
+text = "就绪"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[connection signal="pressed" from="TopBar/ApiCheckBtn" to="." method="_on_check_api_pressed"]
+[connection signal="pressed" from="TopBar/CloseBtn" to="." method="_on_close_pressed"]
+[connection signal="pressed" from="ConfigBtn" to="." method="_on_config_pressed"]
+[connection signal="pressed" from="TranslateBtn" to="." method="_on_translate_btn_pressed"]
