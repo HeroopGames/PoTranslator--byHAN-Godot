@@ -269,7 +269,7 @@ func _show_project_controls():
 # ====== 使用说明 / 版权内容 ======
 const HELP_TEXT: String = """【PoTranslator by HAN · 使用说明】
 
-本工具用于翻译 UE 导出的 .po 文件，支持多项目管理、xlsx 规则表驱动翻译与 Google 免费 API。
+本工具用于翻译 UE 导出的 .po 文件，支持多项目管理、xlsx 规则表驱动翻译与 API（目前仅可用LibreTranslate）。
 
 ■ 启动界面按钮
 · ？— 点击查看本使用说明
@@ -278,7 +278,7 @@ const HELP_TEXT: String = """【PoTranslator by HAN · 使用说明】
 · 打开项目 — 选择已有的 .pohtran 项目文件继续工作
 
 ■ 翻译界面按钮
-· 顶部 API 下拉框 — 选择翻译引擎（目前只有 Google 非官方翻译）
+· 顶部 API 下拉框 — 选择翻译引擎（目前仅可用LibreTranslate）
 · 检测按钮 — 检测所选 API 是否可用
 · 顶部语言下拉框 — 设置源语言（左）和目标语言（右）
 · [×] 关闭按钮 — 关闭当前项目翻译界面，返回启动界面
@@ -348,7 +348,7 @@ PoTranslator by HAN
 · Godot Engine (MIT License)
 · openpyxl (MIT License)
 · Python (PSF License)
-各第三方组件版权归其各自所有者所有。"""
+各第三方组件与API版权归其各自所有者所有。"""
 
 # ====== 按钮回调 ======
 func _on_retry_pressed():

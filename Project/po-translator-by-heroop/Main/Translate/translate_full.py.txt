@@ -7,6 +7,8 @@ target_lang   = sys.argv[3]
 batch_size    = int(sys.argv[4])
 progress_path = sys.argv[5]
 project_path  = sys.argv[6] if len(sys.argv) > 6 else ""
+api_type      = sys.argv[7] if len(sys.argv) > 7 else "google"
+api_url       = sys.argv[8] if len(sys.argv) > 8 else ""
 
 result_path = progress_path.replace("_translate_progress.json", "_translate_result.json")
 log_path    = progress_path.replace("_translate_progress.json", "_translate_debug.log")
@@ -21,8 +23,10 @@ def log(msg):
 log("=== translate_full.py started ===")
 log("po_path=%s" % po_path)
 log("project_path=%s" % project_path)
+log("api_type=%s" % api_type)
+log("api_url=%s" % api_url)
 
-ENDPOINT = "https://translate.googleapis.com/translate_a/single"
+GOOGLE_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 TIMEOUT  = 15
 MAX_WORKERS = 10  # 并发 AI 翻译线程数
 HDR      = {"User-Agent": "Mozilla/5.0"}
@@ -393,32 +397,72 @@ def apply_rules(mid, ctx, ctxx, rules):
 #  AI 翻译前：用正则保护要保留的部分
 # ============================================================
 
-def protect_for_ai(mid, rules):
+def protect_for_ai(mid, rules, api_type="google"):
     """返回 (protected_text, placeholders_dict)
-    protected_text 中，正则匹配的部分被替换为 __PO_PROTECT_N__ 占位符
+    protected_text 中，正则匹配的部分被替换为占位符
     翻译后再用 restore_from_protection 还原
+    api_type: google 使用 __PO_PROTECT_N__ 格式
+              libretranslate 使用 <PN> 格式（LibreTranslate 对短标签更友好）
+    
+    注意：所有正则规则一次性收集匹配项，从后往前统一替换，
+    避免后续规则匹配到前面生成的占位符导致二次替换。
     """
     if not rules or not rules.get("regex_protect"):
         return mid, {}
 
-    placeholders = {}
-    counter = [0]  # 用列表包装，避免闭包 nonlocal 问题
+    matches = []  # [(start, end, matched_text)]
     for pat in rules["regex_protect"]:
-        def _replacer(m, _pat=pat):
-            key = "__PO_PROTECT_%d__" % counter[0]
-            placeholders[key] = m.group(0)
-            counter[0] += 1
-            return key
-        mid = pat.sub(_replacer, mid)
+        for m in pat.finditer(mid):
+            matches.append((m.start(), m.end(), m.group(0)))
 
-    return mid, placeholders
+    if not matches:
+        return mid, {}
+
+    matches.sort(key=lambda x: x[0], reverse=True)
+
+    placeholders = {}
+    counter = 0
+    result = mid
+    for start, end, text in matches:
+        if api_type == "libretranslate":
+            key = "<P%d>" % counter
+        else:
+            key = "__PO_PROTECT_%d__" % counter
+        placeholders[key] = text
+        result = result[:start] + key + result[end:]
+        counter += 1
+
+    return result, placeholders
 
 def restore_from_protection(text, placeholders):
-    """将占位符还原为原始文本"""
+    """将占位符还原为原始文本
+    对于 LibreTranslate 的 <PN> 格式，使用正则宽松匹配（不区分大小写、容忍空格）
+    对于 Google 的 __PO_PROTECT_N__ 格式，使用精确字符串替换
+    """
     if not placeholders:
         return text
-    for key, val in placeholders.items():
-        text = text.replace(key, val)
+    
+    libre_pattern = re.compile(r'^<[Pp]\d+>$')
+    is_libre = any(libre_pattern.match(k) for k in placeholders.keys())
+    
+    if is_libre:
+        idx_map = {}
+        for key, val in placeholders.items():
+            m = re.match(r'^<[Pp](\d+)>$', key)
+            if m:
+                idx_map[int(m.group(1))] = val
+        
+        def _restore_replacer(m):
+            idx = int(m.group(1))
+            if idx in idx_map:
+                return idx_map[idx]
+            return m.group(0)
+        
+        text = re.sub(r'<\s*[Pp]\s*(\d+)\s*>', _restore_replacer, text)
+    else:
+        for key, val in placeholders.items():
+            text = text.replace(key, val)
+    
     return text
 
 
@@ -453,8 +497,18 @@ def read_memory(memory_path):
 
 def translate_one(text):
     try:
+        if api_type == "libretranslate":
+            return _translate_libre(text)
+        else:
+            return _translate_google(text)
+    except Exception as e:
+        log("  translate_one ERROR: %s | text=%s" % (str(e), text[:60]))
+    return ""
+
+def _translate_google(text):
+    try:
         q = urllib.parse.quote(text.encode("utf-8"))
-        url = ENDPOINT + "?client=gtx&dt=t&sl=%s&tl=%s&q=%s" % (
+        url = GOOGLE_ENDPOINT + "?client=gtx&dt=t&sl=%s&tl=%s&q=%s" % (
             urllib.parse.quote(src_lang), urllib.parse.quote(target_lang), q
         )
         req = urllib.request.Request(url, headers=HDR, method="GET")
@@ -470,7 +524,43 @@ def translate_one(text):
             if result:
                 return result
     except Exception as e:
-        log("  translate_one ERROR: %s | text=%s" % (str(e), text[:60]))
+        log("  _translate_google ERROR: %s | text=%s" % (str(e), text[:60]))
+    return ""
+
+def _translate_libre(text):
+    try:
+        def _convert_lang(code):
+            mapping = {
+                "zh-CN": "zh-Hans",
+                "zh-TW": "zh-Hant",
+                "auto": "auto"
+            }
+            return mapping.get(code, code)
+
+        base_url = api_url.rstrip("/") if api_url else "http://localhost:5000"
+        url = base_url + "/translate"
+        src = _convert_lang(src_lang)
+        tgt = _convert_lang(target_lang)
+        payload = json.dumps({
+            "q": text,
+            "source": src,
+            "target": tgt,
+            "format": "text"
+        }).encode("utf-8")
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Content-Type": "application/json"
+        }
+        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        r = urllib.request.urlopen(req, timeout=TIMEOUT)
+        body = r.read().decode(errors="replace")
+        data = json.loads(body)
+        if isinstance(data, dict) and "translatedText" in data:
+            result = data["translatedText"]
+            if result:
+                return result
+    except Exception as e:
+        log("  _translate_libre ERROR: %s | text=%s" % (str(e), text[:60]))
     return ""
 
 def write_progress(done, total, current):
@@ -557,7 +647,7 @@ try:
                 done += 1
             else:
                 # 需要 AI 翻译：准备保护后的文本
-                protected_mid, placeholders = protect_for_ai(mid, rules) if rules else (mid, {})
+                protected_mid, placeholders = protect_for_ai(mid, rules, api_type) if rules else (mid, {})
                 ai_tasks.append((idx, mid, protected_mid, placeholders))
 
         # ---- 阶段2：AI 翻译（并发） ----

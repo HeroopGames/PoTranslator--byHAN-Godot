@@ -58,6 +58,7 @@ var _translate_total: int = 0
 var _last_reloaded_done: int = 0
 var _lang_list: Array = []
 var _toast_label: Label = null
+var _toast_click_to_close: bool = false
 var _progress_poll_timer: Timer = null
 
 # — 长按清空定时器
@@ -131,6 +132,8 @@ func _ready():
 	_setup_lang_options()
 	translate_progress_box.visible = false
 
+	api_option.item_selected.connect(_on_api_option_selected)
+
 	_toast_label = Label.new()
 	_toast_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_toast_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -144,6 +147,12 @@ func _process(_delta: float):
 	if _pending_refresh:
 		_pending_refresh = false
 		_do_refresh_visible_rows()
+
+func _unhandled_input(event: InputEvent):
+	if _toast_click_to_close and _toast_label and _toast_label.visible:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			_hide_toast()
+			get_viewport().set_input_as_handled()
 
 
 # ======== 静态入口 / UI 事件 ========
@@ -837,7 +846,8 @@ func _rebuild_heights_core():
 
 func _setup_api_options():
 	api_option.clear()
-	api_option.add_item("谷歌免费API", 0)
+	api_option.add_item("LibreTranslate", 0)
+	api_option.add_item("谷歌非官方API", 1)
 	api_option.selected = 0
 
 func _setup_lang_options():
@@ -931,6 +941,16 @@ func _on_translate_btn_pressed():
 	var target_lang: String = _lang_list[target_lang_option.selected]["code"]
 	var progress_path := OS.get_user_data_dir().path_join("_po_translate_progress.json")
 
+	var api_idx := api_option.selected
+	var api_type: String
+	var api_url: String
+	if api_idx == 0:
+		api_type = "libretranslate"
+		api_url = "http://localhost:5000"
+	else:
+		api_type = "google"
+		api_url = ""
+
 	# 在主线程复制 Python 脚本到临时路径（FileAccess 在 WorkerThread 中不可靠）
 	var script_temp := PythonBridge.copy_script_to_temp()
 	if script_temp.is_empty():
@@ -939,7 +959,7 @@ func _on_translate_btn_pressed():
 		return
 
 	var task_id := WorkerThreadPool.add_task(
-		PythonBridge.run_full_translate.bind(file_path, src_lang, target_lang, TRANSLATE_BATCH_SIZE, progress_path, script_temp, _project_path)
+		PythonBridge.run_full_translate.bind(file_path, src_lang, target_lang, TRANSLATE_BATCH_SIZE, progress_path, script_temp, _project_path, api_type, api_url)
 	)
 
 	# 启动进度轮询
@@ -1033,14 +1053,6 @@ func _poll_progress(task_id: int, progress_path: String, po_file_path: String):
 		await _load_po_file(_current_file_name)
 		_show_entries(_current_file_name)
 
-		if _translation_memory != null:
-			var data: Dictionary = _po_data.get(_current_file_name, {})
-			var msgids: PackedStringArray = data.get("msgids", PackedStringArray())
-			var msgstrs2: PackedStringArray = data.get("msgstrs", PackedStringArray())
-			for idx in msgids.size():
-				if idx < msgstrs2.size() and msgstrs2[idx] != "":
-					_translation_memory.record(msgids[idx], msgstrs2[idx])
-			_memory_dirty = true
 	else:
 		_dirty_entries.clear()
 		_dirty_files.clear()
@@ -1104,6 +1116,11 @@ func _auto_check_api() -> void:
 func _on_check_api_pressed() -> void:
 	_check_current_api()
 
+func _on_api_option_selected(_index: int) -> void:
+	_api_available = false
+	translate_btn.disabled = true
+	_check_current_api()
+
 func _check_current_api() -> void:
 	if _api_checking:
 		return
@@ -1113,8 +1130,16 @@ func _check_current_api() -> void:
 	_api_checking = true
 	_show_toast("正在检测 API...")
 
-	var url := "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=en&tl=zh&q=test"
-	_api_check_task_id = WorkerThreadPool.add_task(PythonBridge.check_api.bind(url))
+	var api_idx := api_option.selected
+	var url: String
+	var api_type: String
+	if api_idx == 0:
+		api_type = "libretranslate"
+		url = "http://localhost:5000"
+	else:
+		api_type = "google"
+		url = "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=en&tl=zh&q=test"
+	_api_check_task_id = WorkerThreadPool.add_task(PythonBridge.check_api.bind(url, api_type))
 
 	_api_check_timer = Timer.new()
 	_api_check_timer.one_shot = false
@@ -1136,17 +1161,24 @@ func _poll_api_check():
 
 	var ok: bool = result.get("available", false)
 	var msg: String
+	var api_idx := api_option.selected
 	if ok:
-		msg = "API 可用"
+		if api_idx == 0:
+			msg = "API 可用"
+		else:
+			msg = "此API仅供学习交流使用，使用此API导致的一切后果作者概不负责。若有需求请购买正版谷歌API"
 	else:
-		msg = "谷歌API检测失败，如果在中国大陆请使用代理后尝试"
+		if api_idx == 0:
+			msg = "请配置LibreTranslate环境"
+		else:
+			msg = "谷歌非官方API检测失败，如果在中国大陆请使用代理后尝试"
 	_api_available = ok
 
 	translate_btn.disabled = not ok or _current_file_name.is_empty()
 
 	var color: Color = Color(0.3, 1, 0.5, 1) if ok else Color(1, 0.4, 0.4, 1)
 	_toast_label.add_theme_color_override("font_color", color)
-	_show_toast(msg)
+	_show_toast(msg, false)
 
 func _kill_api_check_timer():
 	if _api_check_timer:
@@ -1157,10 +1189,18 @@ func _kill_api_check_timer():
 
 # ======== Toast ========
 
-func _show_toast(msg: String):
+func _show_toast(msg: String, auto_close: bool = true):
 	_toast_label.text = msg
 	_toast_label.visible = true
 	_toast_label.position = Vector2(0, size.y - 60)
 	_toast_label.size.x = size.x
-	await get_tree().create_timer(2.0).timeout
+	_toast_click_to_close = not auto_close
+	if auto_close:
+		await get_tree().create_timer(2.0).timeout
+		if _toast_label and _toast_label.visible:
+			_toast_label.visible = false
+			_toast_click_to_close = false
+
+func _hide_toast():
 	_toast_label.visible = false
+	_toast_click_to_close = false

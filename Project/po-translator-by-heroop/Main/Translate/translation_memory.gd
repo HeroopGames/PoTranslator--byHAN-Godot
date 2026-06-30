@@ -1,6 +1,7 @@
 # === PoTranslatorByHAN · 翻译记忆 ===
-# 以 msgid 为 key，记录每条 msgid 被翻译的次数和结果
-# 同一 msgid 翻译 2 次及以上 → 存入记忆，后续翻译命中时优先使用
+# 以 msgid 为 key，记录每条 msgid 手动翻译的次数和结果
+# 同一 msgid 手动翻译 2 次且译文相同 → 存入记忆，后续翻译命中时优先使用
+# 若两次译文不同则重置计数，避免不稳定的翻译污染记忆
 class_name TranslationMemory
 extends RefCounted
 
@@ -48,14 +49,18 @@ func lookup(msgid: String) -> String:
 		return entry.get("text", "")
 	return ""
 
-## 记录一次翻译结果：增加计数，≥2 时更新译文
+## 记录一次手动翻译结果：仅当相同译文出现 2 次及以上时才计入记忆
+## 若译文与上一次不同，则重置计数
 func record(msgid: String, translated_text: String):
 	if _data.has(msgid):
 		var entry: Dictionary = _data[msgid]
-		var count: int = entry.get("count", 0) + 1
-		entry["count"] = count
-		if count >= 2:
+		var last_text: String = entry.get("text", "")
+		if last_text == translated_text:
+			var count: int = entry.get("count", 0) + 1
+			entry["count"] = count
+		else:
 			entry["text"] = translated_text
+			entry["count"] = 1
 	else:
 		_data[msgid] = {"text": translated_text, "count": 1}
 

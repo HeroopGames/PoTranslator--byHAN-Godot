@@ -1,6 +1,7 @@
 # === PoTranslatorByHAN · Python HTTP 桥接 ===
 # 提供 WorkerThreadPool 后台线程入口
 # Python 脚本内嵌在 EMBEDDED_PY_B64 常量中，导出后无需外部文件
+# 注意：使用的谷歌翻译接口为非官方 API，仅供学习研究使用，不可用于商业用途
 class_name PythonHttpBridge
 extends RefCounted
 
@@ -54,15 +55,34 @@ static func _read_py_script() -> String:
 
 # ======== API 检测 ========
 
-static func check_api(url: String):
-	_api_check_result = _do_check(url)
+static func check_api(url: String, api_type: String = "google"):
+	_api_check_result = _do_check(url, api_type)
 
-static func _do_check(url: String) -> Dictionary:
+static func _do_check(url: String, api_type: String) -> Dictionary:
 	var cmd := _find_python()
 	if cmd.is_empty():
 		return {"available": false, "message": "Python 不可用"}
 
-	var check_script := """
+	var check_script := ""
+	if api_type == "libretranslate":
+		check_script = """
+import json, sys, urllib.request, ssl
+url = sys.argv[1].rstrip("/") + "/translate"
+ctx = ssl.create_default_context()
+hdr = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
+payload = json.dumps({"q": "test", "source": "en", "target": "zh-Hans", "format": "text"}).encode("utf-8")
+try:
+    req = urllib.request.Request(url, data=payload, headers=hdr, method="POST")
+    r = urllib.request.urlopen(req, timeout=10, context=ctx)
+    body = r.read().decode(errors="replace")
+    data = json.loads(body)
+    ok = isinstance(data, dict) and "translatedText" in data
+    print(json.dumps({"available": ok, "message": "API OK" if ok else "bad response"}))
+except Exception as e:
+    print(json.dumps({"available": false, "message": str(e)}))
+"""
+	else:
+		check_script = """
 import json, sys, urllib.request, ssl
 url = sys.argv[1]
 ctx = ssl.create_default_context()
@@ -104,7 +124,7 @@ static func cancel_translate():
 		_running_pid = -1
 
 
-static func run_full_translate(po_path: String, src_lang: String, target_lang: String, batch_size: int, progress_path: String, script_temp_path: String, project_path: String = ""):
+static func run_full_translate(po_path: String, src_lang: String, target_lang: String, batch_size: int, progress_path: String, script_temp_path: String, project_path: String = "", api_type: String = "google", api_url: String = ""):
 	_cancel_flag = false
 	_write_bridge_log(progress_path, "bridge start")
 	_write_bridge_log(progress_path, "  po_path=%s" % po_path)
@@ -112,6 +132,7 @@ static func run_full_translate(po_path: String, src_lang: String, target_lang: S
 	_write_bridge_log(progress_path, "  project_path=%s" % project_path)
 	_write_bridge_log(progress_path, "  script_temp=%s" % script_temp_path)
 	_write_bridge_log(progress_path, "  src=%s target=%s" % [src_lang, target_lang])
+	_write_bridge_log(progress_path, "  api_type=%s api_url=%s" % [api_type, api_url])
 
 	if FileAccess.file_exists(progress_path):
 		DirAccess.remove_absolute(progress_path)
@@ -127,7 +148,7 @@ static func run_full_translate(po_path: String, src_lang: String, target_lang: S
 		_write_bridge_log(progress_path, "  ERROR: script path empty")
 		return
 
-	var args := PackedStringArray([script_temp_path, po_path, src_lang, target_lang, str(batch_size), progress_path, project_path])
+	var args := PackedStringArray([script_temp_path, po_path, src_lang, target_lang, str(batch_size), progress_path, project_path, api_type, api_url])
 	_write_bridge_log(progress_path, "  executing (create_process)...")
 
 	var pid := OS.create_process(cmd, args, false)
