@@ -106,6 +106,21 @@ theme_override_styles/normal = SubResource("StyleBox_option_normal")
 theme_override_styles/hover = SubResource("StyleBox_option_hover")
 text = "检测API"
 
+[node name="ApiUrlLabel" type="Label" parent="TopBar" unique_id=-372819401]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 0.7)
+theme_override_font_sizes/font_size = 13
+text = "API URL:"
+
+[node name="ApiUrlEdit" type="LineEdit" parent="TopBar" unique_id=-372819402]
+custom_minimum_size = Vector2(220, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
+theme_override_colors/font_placeholder_color = Color(0.3, 1, 0.5, 0.35)
+theme_override_font_sizes/font_size = 13
+placeholder_text = "http://localhost:5000"
+text = "http://localhost:5000"
+
 [node name="SrcLangOption" type="OptionButton" parent="TopBar" unique_id=2109384756]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)

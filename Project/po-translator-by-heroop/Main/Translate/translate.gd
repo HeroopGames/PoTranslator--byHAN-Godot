@@ -74,6 +74,8 @@ var _api_check_timer: Timer = null
 # — UI 节点
 @onready var api_option: OptionButton = $TopBar/ApiOption
 @onready var api_check_btn: Button = $TopBar/ApiCheckBtn
+@onready var api_url_edit: LineEdit = $TopBar/ApiUrlEdit
+@onready var api_url_label: Label = $TopBar/ApiUrlLabel
 @onready var main_panel: Panel = $MainPanel
 @onready var tab_bar: HBoxContainer = $MainPanel/TabBar
 @onready var content_scroll: ScrollContainer = $MainPanel/ContentScroll
@@ -131,6 +133,7 @@ func _ready():
 	_setup_api_options()
 	_setup_lang_options()
 	translate_progress_box.visible = false
+	_update_api_url_visibility()
 
 	api_option.item_selected.connect(_on_api_option_selected)
 
@@ -946,7 +949,9 @@ func _on_translate_btn_pressed():
 	var api_url: String
 	if api_idx == 0:
 		api_type = "libretranslate"
-		api_url = "http://localhost:5000"
+		api_url = api_url_edit.text.strip_edges()
+		if api_url.is_empty():
+			api_url = "http://localhost:5000"
 	else:
 		api_type = "google"
 		api_url = ""
@@ -1119,7 +1124,13 @@ func _on_check_api_pressed() -> void:
 func _on_api_option_selected(_index: int) -> void:
 	_api_available = false
 	translate_btn.disabled = true
+	_update_api_url_visibility()
 	_check_current_api()
+
+func _update_api_url_visibility() -> void:
+	var is_libre: bool = api_option.selected == 0
+	api_url_edit.visible = is_libre
+	api_url_label.visible = is_libre
 
 func _check_current_api() -> void:
 	if _api_checking:
@@ -1135,7 +1146,9 @@ func _check_current_api() -> void:
 	var api_type: String
 	if api_idx == 0:
 		api_type = "libretranslate"
-		url = "http://localhost:5000"
+		url = api_url_edit.text.strip_edges()
+		if url.is_empty():
+			url = "http://localhost:5000"
 	else:
 		api_type = "google"
 		url = "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=en&tl=zh&q=test"
