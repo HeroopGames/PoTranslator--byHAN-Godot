@@ -73,7 +73,7 @@ static func parse_file(file_path: String) -> Array:
 
 
 ## 解析 .po 文件，返回打包数据（线程安全，WorkerThreadPool 可用）
-## 返回: { "c": PackedStringArray, "m": PackedStringArray, "s": PackedStringArray }
+## 返回: { "c": PackedStringArray, "m": PackedStringArray, "s": PackedStringArray, "sl": PackedStringArray }
 static func parse_file_packed(file_path: String) -> Dictionary:
 	var f := FileAccess.open(file_path, FileAccess.READ)
 	if f == null:
@@ -82,17 +82,22 @@ static func parse_file_packed(file_path: String) -> Dictionary:
 	var ctx_list: Array[String] = []
 	var mid_list: Array[String] = []
 	var mstr_list: Array[String] = []
+	var srcloc_list: Array[String] = []
 	var in_header := true
 	var cur_ctx := ""
 	var cur_msgid := ""
 	var cur_msgstr := ""
+	var cur_srcloc := ""
 	var collecting_msgid := false
 	var collecting_msgstr := false
 
 	while not f.eof_reached():
 		var line := f.get_line()
 
-		if line.begins_with("#"):
+		if line.begins_with("#. SourceLocation:"):
+			cur_srcloc = line.substr(17).strip_edges()
+			continue
+		elif line.begins_with("#"):
 			continue
 
 		if line.begins_with("msgctxt "):
@@ -100,6 +105,8 @@ static func parse_file_packed(file_path: String) -> Dictionary:
 				ctx_list.append(cur_ctx)
 				mid_list.append(cur_msgid)
 				mstr_list.append(cur_msgstr)
+				srcloc_list.append(cur_srcloc)
+				cur_srcloc = ""
 			cur_ctx = _strip_po_string(line.substr(8))
 			collecting_msgid = false
 			collecting_msgstr = false
@@ -132,7 +139,9 @@ static func parse_file_packed(file_path: String) -> Dictionary:
 				ctx_list.append(cur_ctx)
 				mid_list.append(cur_msgid)
 				mstr_list.append(cur_msgstr)
+				srcloc_list.append(cur_srcloc)
 				cur_msgid = ""
+				cur_srcloc = ""
 			collecting_msgid = false
 			collecting_msgstr = false
 
@@ -142,11 +151,13 @@ static func parse_file_packed(file_path: String) -> Dictionary:
 		ctx_list.append(cur_ctx)
 		mid_list.append(cur_msgid)
 		mstr_list.append(cur_msgstr)
+		srcloc_list.append(cur_srcloc)
 
 	return {
 		"c": PackedStringArray(ctx_list),
 		"m": PackedStringArray(mid_list),
-		"s": PackedStringArray(mstr_list)
+		"s": PackedStringArray(mstr_list),
+		"sl": PackedStringArray(srcloc_list)
 	}
 
 
@@ -154,7 +165,7 @@ static func _build_entry(ctx: String, msgid: String, msgstr: String) -> Dictiona
 	return { "context": ctx, "msgid": msgid, "msgstr": msgstr }
 
 static func _empty_packed() -> Dictionary:
-	return { "c": PackedStringArray(), "m": PackedStringArray(), "s": PackedStringArray() }
+	return { "c": PackedStringArray(), "m": PackedStringArray(), "s": PackedStringArray(), "sl": PackedStringArray() }
 
 
 # ======== 写入（按行遍历，仅替换 dirtied 条目的 msgid/msgstr 内容） ========

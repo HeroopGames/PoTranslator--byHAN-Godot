@@ -99,6 +99,26 @@ var _api_check_timer: Timer = null
 @onready var chk_untranslated: CheckBox = $MainPanel/FilterScroll/FilterCheckRow/ChkUntranslated
 @onready var chk_empty: CheckBox = $MainPanel/FilterScroll/FilterCheckRow/ChkEmpty
 @onready var loading_overlay: ColorRect = $LoadingOverlay
+@onready var detail_panel: Panel = $DetailPanel
+@onready var detail_index_label: Label = $DetailPanel/DetailScroll/DetailVBox/InfoHBox/IndexLabel
+@onready var detail_source_label: Label = $DetailPanel/DetailScroll/DetailVBox/InfoHBox/SourceLabel
+@onready var detail_context_label: Label = $DetailPanel/DetailScroll/DetailVBox/ContextLabel
+@onready var detail_srcloc_title: Label = $DetailPanel/DetailScroll/DetailVBox/SrcLocTitle
+@onready var detail_srcloc_content: Label = $DetailPanel/DetailScroll/DetailVBox/SrcLocContent
+@onready var detail_sep2: HSeparator = $DetailPanel/DetailScroll/DetailVBox/Sep2
+@onready var detail_sep3: HSeparator = $DetailPanel/DetailScroll/DetailVBox/Sep3
+@onready var detail_sep4: HSeparator = $DetailPanel/DetailScroll/DetailVBox/Sep4
+@onready var detail_sep5: HSeparator = $DetailPanel/DetailScroll/DetailVBox/Sep5
+@onready var detail_sep6: HSeparator = $DetailPanel/DetailScroll/DetailVBox/Sep6
+@onready var detail_msgid_content: Label = $DetailPanel/DetailScroll/DetailVBox/MsgidContent
+@onready var detail_msgstr_content: Label = $DetailPanel/DetailScroll/DetailVBox/MsgstrContent
+@onready var detail_dirty_label: Label = $DetailPanel/DetailScroll/DetailVBox/DirtyLabel
+@onready var detail_glow_top: ColorRect = $DetailPanel/GlowLineTop
+@onready var detail_glow_bottom: ColorRect = $DetailPanel/GlowLineBottom
+@onready var detail_scan_line: ColorRect = $DetailPanel/ScanLine
+var _detail_hover_idx: int = -1
+var _glow_pulse_time: float = 0.0
+var _scan_line_pos: float = 0.0
 
 
 # ======== 生命周期 ========
@@ -146,10 +166,22 @@ func _ready():
 	_toast_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_toast_label)
 
-func _process(_delta: float):
+func _process(delta: float):
 	if _pending_refresh:
 		_pending_refresh = false
 		_do_refresh_visible_rows()
+	_glow_pulse_time += delta
+	var pulse := 0.4 + 0.2 * sin(_glow_pulse_time * 2.0)
+	if detail_glow_top:
+		detail_glow_top.color = Color(0.3, 1, 0.5, pulse)
+	if detail_glow_bottom:
+		detail_glow_bottom.color = Color(0.3, 1, 0.5, pulse)
+	if detail_scan_line and detail_panel:
+		_scan_line_pos += delta * 40.0
+		var panel_h := detail_panel.size.y
+		if _scan_line_pos > panel_h:
+			_scan_line_pos = -4.0
+		detail_scan_line.position.y = _scan_line_pos
 
 func _unhandled_input(event: InputEvent):
 	if _toast_click_to_close and _toast_label and _toast_label.visible:
@@ -438,10 +470,12 @@ func _load_po_file(file_name: String):
 
 	var msgids: PackedStringArray = packed.get("m", PackedStringArray())
 	var contexts: PackedStringArray = packed.get("c", PackedStringArray())
+	var src_locs: PackedStringArray = packed.get("sl", PackedStringArray())
 	_po_data[file_name] = {
 		"contexts": contexts,
 		"msgids": msgids,
 		"msgstrs": packed.get("s", PackedStringArray()),
+		"source_locations": src_locs,
 		"file_path": file_path
 	}
 
@@ -463,6 +497,7 @@ func _reload_current_po_data():
 		"contexts": packed.get("c", PackedStringArray()),
 		"msgids": packed.get("m", PackedStringArray()),
 		"msgstrs": packed.get("s", PackedStringArray()),
+		"source_locations": packed.get("sl", PackedStringArray()),
 		"file_path": file_path
 	}
 
@@ -639,6 +674,10 @@ func _get_pooled_entry() -> PoEntry:
 ## 将节点归还到隐藏池
 func _return_to_hidden_pool(e: PoEntry):
 	e.visible = false
+	if e.entry_hovered.is_connected(_on_entry_hovered):
+		e.entry_hovered.disconnect(_on_entry_hovered)
+	if e.entry_unhovered.is_connected(_on_entry_unhovered):
+		e.entry_unhovered.disconnect(_on_entry_unhovered)
 	_hidden_pool.append(e)
 	while _hidden_pool.size() > MAX_HIDDEN_POOL:
 		var x: PoEntry = _hidden_pool.pop_front()
@@ -685,6 +724,10 @@ func _do_refresh_visible_rows():
 		var e: PoEntry = _entry_pool[i]
 		if not e.entry_saved.is_connected(_on_entry_saved):
 			e.entry_saved.connect(_on_entry_saved)
+		if not e.entry_hovered.is_connected(_on_entry_hovered):
+			e.entry_hovered.connect(_on_entry_hovered)
+		if not e.entry_unhovered.is_connected(_on_entry_unhovered):
+			e.entry_unhovered.connect(_on_entry_unhovered)
 		_fill_entry(e, _current_file_name, idx)
 		e.set_entry(
 			_get_entry_msgid(_current_file_name, idx),
@@ -759,6 +802,110 @@ func _on_entry_saved(entry_index: int, field: String, new_text: String):
 	_flush_save()
 	_do_refresh_visible_rows()
 	_refresh_filter_counts()
+	if _detail_hover_idx == entry_index:
+		_update_detail_panel(entry_index)
+
+func _on_entry_hovered(entry_index: int):
+	_detail_hover_idx = entry_index
+	_update_detail_panel(entry_index)
+
+func _on_entry_unhovered(entry_index: int):
+	if _detail_hover_idx == entry_index:
+		_detail_hover_idx = -1
+
+func _update_detail_panel(idx: int):
+	if _current_file_name.is_empty() or idx < 0:
+		return
+	var data: Dictionary = _po_data.get(_current_file_name, {})
+	var msgids: PackedStringArray = data.get("msgids", PackedStringArray())
+	var msgstrs: PackedStringArray = data.get("msgstrs", PackedStringArray())
+	var contexts: PackedStringArray = data.get("contexts", PackedStringArray())
+	var src_locs: PackedStringArray = data.get("source_locations", PackedStringArray())
+	if idx >= msgids.size():
+		return
+
+	var mid: String = msgids[idx] if idx < msgids.size() else ""
+	var mstr: String = msgstrs[idx] if idx < msgstrs.size() else ""
+	var ctx: String = contexts[idx] if idx < contexts.size() else ""
+	var srcloc: String = src_locs[idx] if idx < src_locs.size() else ""
+	var src: String = _translation_source.get(idx, "")
+
+	detail_index_label.text = "索引: %d / %d" % [idx, msgids.size()]
+
+	var src_text: String
+	var src_color: Color
+	match src:
+		"ai":
+			src_text = "AI 翻译"
+			src_color = Color(0.35, 0.6, 1, 1)
+		"manual":
+			src_text = "手动翻译"
+			src_color = Color(0.3, 1, 0.5, 1)
+		"rule":
+			src_text = "规则翻译"
+			src_color = Color(1, 0.85, 0.3, 1)
+		"memory":
+			src_text = "翻译记忆"
+			src_color = Color(0.7, 0.35, 1, 1)
+		_:
+			if mstr == "":
+				src_text = "未翻译"
+				src_color = Color(0.85, 0.35, 0.35, 1)
+			elif mstr == mid:
+				src_text = "未翻译（同原文）"
+				src_color = Color(0.85, 0.35, 0.35, 1)
+			else:
+				src_text = "已翻译"
+				src_color = Color(0.3, 1, 0.5, 1)
+	detail_source_label.text = "来源: " + src_text
+	detail_source_label.add_theme_color_override("font_color", src_color)
+
+	if ctx != "":
+		detail_context_label.text = "上下文: " + ctx
+		detail_context_label.visible = true
+	else:
+		detail_context_label.text = "上下文: —"
+		detail_context_label.visible = false
+
+	if srcloc != "":
+		detail_srcloc_content.text = srcloc
+		detail_srcloc_title.visible = true
+		detail_srcloc_content.visible = true
+	else:
+		detail_srcloc_content.text = "—"
+		detail_srcloc_title.visible = false
+		detail_srcloc_content.visible = false
+
+	var ctx_show := detail_context_label.visible
+	var srcloc_show := detail_srcloc_title.visible
+	detail_sep2.visible = true
+	detail_sep3.visible = ctx_show and srcloc_show
+	detail_sep4.visible = true
+	detail_sep5.visible = true
+
+	detail_msgid_content.text = mid if mid != "" else "(空)"
+	detail_msgstr_content.text = mstr if mstr != "" else "(空)"
+
+	if idx in _dirty_entries:
+		var dirty_val = _dirty_entries[idx]
+		var dirty_text: String
+		if typeof(dirty_val) == TYPE_BOOL and dirty_val:
+			dirty_text = "● 已修改（msgid + msgstr）"
+		elif typeof(dirty_val) == TYPE_STRING:
+			if dirty_val == "both":
+				dirty_text = "● 已修改（msgid + msgstr）"
+			elif dirty_val == "msgid":
+				dirty_text = "● 已修改（msgid）"
+			else:
+				dirty_text = "● 已修改（msgstr）"
+		else:
+			dirty_text = "● 已修改"
+		detail_dirty_label.text = dirty_text
+		detail_dirty_label.visible = true
+	else:
+		detail_dirty_label.visible = false
+
+	detail_sep6.visible = detail_dirty_label.visible
 
 func _mark_dirty(entry_index: int, field: String):
 	if entry_index in _dirty_entries:

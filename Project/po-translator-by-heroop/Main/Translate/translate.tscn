@@ -63,6 +63,18 @@ corner_radius_top_right = 6
 corner_radius_bottom_right = 6
 corner_radius_bottom_left = 6
 
+[sub_resource type="StyleBoxFlat" id="StyleBox_detail_panel"]
+bg_color = Color(0, 0.03, 0.02, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.3, 1, 0.5, 0.25)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
 [node name="Translate" type="Control" unique_id=1846527759]
 layout_mode = 3
 anchors_preset = 15
@@ -118,8 +130,8 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
 theme_override_colors/font_placeholder_color = Color(0.3, 1, 0.5, 0.35)
 theme_override_font_sizes/font_size = 13
-placeholder_text = "http://localhost:5000"
 text = "http://localhost:5000"
+placeholder_text = "http://localhost:5000"
 
 [node name="SrcLangOption" type="OptionButton" parent="TopBar" unique_id=2109384756]
 layout_mode = 2
@@ -177,15 +189,13 @@ text = "配置"
 
 [node name="MainPanel" type="Panel" parent="." unique_id=1800508280]
 layout_mode = 1
-anchors_preset = 8
-anchor_left = 0.5
-anchor_top = 0.5
-anchor_right = 0.5
-anchor_bottom = 0.5
-offset_left = -420.0
-offset_top = -240.0
-offset_right = 420.0
-offset_bottom = 240.0
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 16.0
+offset_top = 98.0
+offset_right = -440.0
+offset_bottom = -131.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
@@ -326,6 +336,255 @@ grow_vertical = 2
 [node name="PoListContainer" type="Control" parent="MainPanel/ContentScroll" unique_id=486555511]
 layout_mode = 2
 size_flags_horizontal = 3
+
+[node name="DetailPanel" type="Panel" parent="." unique_id=2000000001]
+layout_mode = 1
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -424.0
+offset_top = 97.0
+offset_right = -16.0
+offset_bottom = -132.0
+grow_horizontal = 0
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBox_detail_panel")
+
+[node name="DetailScroll" type="ScrollContainer" parent="DetailPanel" unique_id=2000000002]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="DetailVBox" type="VBoxContainer" parent="DetailPanel/DetailScroll" unique_id=2000000003]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 14
+
+[node name="DetailTitle" type="Label" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000004]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 1, 0.5, 1)
+theme_override_font_sizes/font_size = 18
+text = "条目详情"
+horizontal_alignment = 1
+
+[node name="TitleSep" type="HSeparator" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000005]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="InfoHBox" type="HBoxContainer" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000033]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="IndexLabel" type="Label" parent="DetailPanel/DetailScroll/DetailVBox/InfoHBox" unique_id=2000000006]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.35, 0.6, 1, 0.9)
+theme_override_font_sizes/font_size = 13
+text = "索引: —"
+
+[node name="SourceLabel" type="Label" parent="DetailPanel/DetailScroll/DetailVBox/InfoHBox" unique_id=2000000007]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.7, 0.35, 1, 0.9)
+theme_override_font_sizes/font_size = 13
+text = "来源: —"
+horizontal_alignment = 2
+
+[node name="Sep2" type="HSeparator" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000028]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="ContextLabel" type="Label" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000008]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.85, 0.3, 0.9)
+theme_override_font_sizes/font_size = 13
+text = "上下文: —"
+
+[node name="Sep3" type="HSeparator" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000029]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="SrcLocTitle" type="Label" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000025]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.6, 1, 1)
+theme_override_font_sizes/font_size = 13
+text = "源位置:"
+
+[node name="SrcLocContent" type="Label" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000026]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.5, 0.75, 1, 0.95)
+theme_override_font_sizes/font_size = 12
+text = "—"
+autowrap_mode = 3
+
+[node name="Sep4" type="HSeparator" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000030]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="MsgidTitle" type="Label" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000009]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.85, 0.7, 1)
+theme_override_font_sizes/font_size = 14
+text = "▶ msgid"
+
+[node name="MsgidContent" type="Label" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000010]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.85, 0.7, 0.95)
+theme_override_font_sizes/font_size = 13
+text = "—"
+autowrap_mode = 3
+
+[node name="Sep5" type="HSeparator" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000031]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="MsgstrTitle" type="Label" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000011]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.35, 0.35, 1)
+theme_override_font_sizes/font_size = 14
+text = "▶ msgstr"
+
+[node name="MsgstrContent" type="Label" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000012]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.35, 0.35, 0.95)
+theme_override_font_sizes/font_size = 13
+text = "—"
+autowrap_mode = 3
+
+[node name="Sep6" type="HSeparator" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000032]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="DirtyLabel" type="Label" parent="DetailPanel/DetailScroll/DetailVBox" unique_id=2000000013]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.5, 0.5, 0.8)
+theme_override_font_sizes/font_size = 12
+horizontal_alignment = 1
+
+[node name="GlowLineTop" type="ColorRect" parent="DetailPanel" unique_id=2000000014]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 2.0
+grow_horizontal = 2
+color = Color(0.3, 1, 0.5, 0.6)
+
+[node name="GlowLineBottom" type="ColorRect" parent="DetailPanel" unique_id=2000000015]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -2.0
+grow_horizontal = 2
+grow_vertical = 0
+color = Color(0.3, 1, 0.5, 0.6)
+
+[node name="CornerTL" type="ColorRect" parent="DetailPanel" unique_id=2000000016]
+layout_mode = 1
+offset_right = 16.0
+offset_bottom = 2.0
+color = Color(0.3, 1, 0.5, 0.8)
+
+[node name="CornerTL2" type="ColorRect" parent="DetailPanel" unique_id=2000000017]
+layout_mode = 1
+offset_right = 2.0
+offset_bottom = 16.0
+color = Color(0.3, 1, 0.5, 0.8)
+
+[node name="CornerTR" type="ColorRect" parent="DetailPanel" unique_id=2000000018]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -16.0
+offset_bottom = 2.0
+grow_horizontal = 0
+grow_vertical = 0
+color = Color(0.3, 1, 0.5, 0.8)
+
+[node name="CornerTR2" type="ColorRect" parent="DetailPanel" unique_id=2000000019]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -2.0
+offset_bottom = 16.0
+grow_horizontal = 0
+grow_vertical = 0
+color = Color(0.3, 1, 0.5, 0.8)
+
+[node name="CornerBL" type="ColorRect" parent="DetailPanel" unique_id=2000000020]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -2.0
+offset_right = 16.0
+grow_horizontal = 2
+grow_vertical = 0
+color = Color(0.3, 1, 0.5, 0.8)
+
+[node name="CornerBL2" type="ColorRect" parent="DetailPanel" unique_id=2000000021]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -16.0
+offset_right = 2.0
+grow_horizontal = 2
+grow_vertical = 0
+color = Color(0.3, 1, 0.5, 0.8)
+
+[node name="CornerBR" type="ColorRect" parent="DetailPanel" unique_id=2000000022]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -16.0
+offset_top = -2.0
+grow_horizontal = 0
+grow_vertical = 0
+color = Color(0.3, 1, 0.5, 0.8)
+
+[node name="CornerBR2" type="ColorRect" parent="DetailPanel" unique_id=2000000023]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -2.0
+offset_top = -16.0
+grow_horizontal = 0
+grow_vertical = 0
+color = Color(0.3, 1, 0.5, 0.8)
+
+[node name="ScanLine" type="ColorRect" parent="DetailPanel" unique_id=2000000024]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 20.0
+offset_bottom = 21.0
+grow_horizontal = 2
+mouse_filter = 2
+color = Color(0.3, 1, 0.5, 0.12)
 
 [node name="LoadingOverlay" type="ColorRect" parent="." unique_id=1570525000]
 visible = false

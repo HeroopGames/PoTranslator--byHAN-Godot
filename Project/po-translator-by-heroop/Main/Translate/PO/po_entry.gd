@@ -5,6 +5,8 @@ class_name PoEntry
 extends Control
 
 signal entry_saved(entry_index: int, field: String, new_text: String)
+signal entry_hovered(entry_index: int)
+signal entry_unhovered(entry_index: int)
 
 @onready var src_label: Label = $Row/SrcLabel
 @onready var src_edit: TextEdit = $Row/SrcEdit
@@ -226,3 +228,18 @@ func _on_src_focus_exited():
 func _on_dst_focus_exited():
 	if _edit_mode == EditMode.DST and _entry_index >= 0:
 		_commit_and_display("msgstr", dst_edit.text)
+
+
+# --------------------- 鼠标悬停 ---------------------
+
+func _ready():
+	mouse_entered.connect(_on_mouse_entered)
+	mouse_exited.connect(_on_mouse_exited)
+
+func _on_mouse_entered():
+	if _entry_index >= 0:
+		entry_hovered.emit(_entry_index)
+
+func _on_mouse_exited():
+	if _entry_index >= 0:
+		entry_unhovered.emit(_entry_index)
