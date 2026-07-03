@@ -39,10 +39,10 @@ def strip_po_string(s):
     t = s.strip()
     if t.startswith('"') and t.endswith('"'):
         t = t[1:-1]
-    return t.replace("\\n","\n").replace("\\t","\t").replace('\\"','"').replace("\\\\","\\")
+    return t.replace("\\n","\n").replace("\\r","\r").replace("\\t","\t").replace('\\"','"').replace("\\\\","\\")
 
 def escape_po(s):
-    return s.replace("\\","\\\\").replace('"','\\"').replace("\n","\\n").replace("\t","\\t")
+    return s.replace("\\","\\\\").replace('"','\\"').replace("\n","\\n").replace("\r","\\r").replace("\t","\\t")
 
 def po_quote(s):
     return '"'+escape_po(s)+'"'
@@ -59,14 +59,14 @@ def read_continuation(f):
 
 def parse_po(file_path):
     entries=[]; header=""; contexts=[]  # contexts: 每个条目的 #: 注释行内容（用于语境匹配）
-    with open(file_path,"r",encoding="utf-8") as f: raw=f.read()
+    with open(file_path,"r",encoding="utf-8",newline="") as f: raw=f.read()
     first=raw.find("\nmsgctxt ")
     if first==-1: first=raw.find("\nmsgid ")
     if first>0: header=raw[:first+1]
     elif first==-1: header=raw
     in_header=True; cur_ctx=cur_msgid=cur_msgstr=""; cur_ctxx=""
     collecting_msgid=collecting_msgstr=False
-    with open(file_path,"r",encoding="utf-8") as f:
+    with open(file_path,"r",encoding="utf-8",newline="") as f:
         while True:
             line=f.readline()
             if not line: break
@@ -106,16 +106,23 @@ def parse_po(file_path):
 def _find_line_end(raw,pos):
     nl=raw.find("\n",pos); return len(raw) if nl==-1 else nl+1
 
-def _build_po_entry(prefix,text):
-    if text=="": return prefix+' ""\n'
+def _detect_newline(raw):
+    """检测文件的换行符格式：返回 '\\r\\n' 或 '\\n'"""
+    if "\r\n" in raw:
+        return "\r\n"
+    return "\n"
+
+def _build_po_entry(prefix,text,newline="\n"):
+    if text=="": return prefix+' ""'+newline
     tok=text.split("\n")
-    if len(tok)<=1: return prefix+" "+po_quote(text)+"\n"
-    r=prefix+" "+po_quote(tok[0])+"\n"
-    for t in tok[1:]: r+='"'+escape_po(t)+'"\n'
+    if len(tok)<=1: return prefix+" "+po_quote(text)+newline
+    r=prefix+" "+po_quote(tok[0])+newline
+    for t in tok[1:]: r+='"'+escape_po(t)+'"'+newline
     return r
 
 def replace_msgstr_inplace(file_path,entries,header):
-    with open(file_path,"r",encoding="utf-8") as f: raw=f.read()
+    with open(file_path,"r",encoding="utf-8",newline="") as f: raw=f.read()
+    nl = _detect_newline(raw)
     result=header; scan_pos=len(header)-1
     for ctx,mid,mstr in entries:
         if not mid: continue
@@ -124,20 +131,20 @@ def replace_msgstr_inplace(file_path,entries,header):
         mid_pos+=1; result+=raw[scan_pos:mid_pos]
         mid_end=_find_line_end(raw,mid_pos); mid_next=mid_end
         while mid_next<len(raw):
-            nl=raw.find("\n",mid_next)
-            if nl==-1: nl=len(raw)
-            if raw[mid_next:nl].strip().startswith('"'): mid_next=nl+1
+            nl_pos=raw.find("\n",mid_next)
+            if nl_pos==-1: nl_pos=len(raw)
+            if raw[mid_next:nl_pos].strip().startswith('"'): mid_next=nl_pos+1
             else: break
         mid_old=raw[mid_pos:mid_next]
         mstr_pos=raw.find("msgstr ",mid_next)
         if mstr_pos==-1 or mstr_pos>=len(raw): result+=raw[mid_pos:]; break
         mstr_end=_find_line_end(raw,mstr_pos); mstr_next=mstr_end
         while mstr_next<len(raw):
-            nl=raw.find("\n",mstr_next)
-            if nl==-1: nl=len(raw)
-            if raw[mstr_next:nl].strip().startswith('"'): mstr_next=nl+1
+            nl_pos=raw.find("\n",mstr_next)
+            if nl_pos==-1: nl_pos=len(raw)
+            if raw[mstr_next:nl_pos].strip().startswith('"'): mstr_next=nl_pos+1
             else: break
-        result+=mid_old; result+=_build_po_entry("msgstr",mstr); scan_pos=mstr_next
+        result+=mid_old; result+=_build_po_entry("msgstr",mstr,nl); scan_pos=mstr_next
     if scan_pos<len(raw): result+=raw[scan_pos:]
     with open(file_path,"w",encoding="utf-8",newline="") as f: f.write(result)
 
@@ -399,43 +406,108 @@ def apply_rules(mid, ctx, ctxx, rules):
 
 def protect_for_ai(mid, rules, api_type="google"):
     """返回 (protected_text, placeholders_dict)
-    protected_text 中，正则匹配的部分被替换为占位符
+    protected_text 中，正则匹配和片段匹配的部分被替换为占位符
     翻译后再用 restore_from_protection 还原
     api_type: google 使用 __PO_PROTECT_N__ 格式
               libretranslate 使用 <PN> 格式（LibreTranslate 对短标签更友好）
     
-    注意：所有正则规则一次性收集匹配项，从后往前统一替换，
+    注意：所有保护规则一次性收集匹配项，从后往前统一替换，
     避免后续规则匹配到前面生成的占位符导致二次替换。
+    
+    占位符值格式:
+      - 正则保护: ("regex", 原始文本)
+      - 片段匹配: ("substring", 目标替换文本)
     """
-    if not rules or not rules.get("regex_protect"):
+    if not rules:
         return mid, {}
 
-    matches = []  # [(start, end, matched_text)]
-    for pat in rules["regex_protect"]:
-        for m in pat.finditer(mid):
-            matches.append((m.start(), m.end(), m.group(0)))
+    has_regex = bool(rules.get("regex_protect"))
+    has_substring = bool(rules.get("substring"))
+    
+    if not has_regex and not has_substring:
+        return mid, {}
+
+    matches = []  # [(start, end, match_type, value)]
+    # match_type: "regex" -> value=原始文本
+    #             "substring" -> value=目标替换文本(dst)
+
+    # 1. 收集正则保护匹配
+    if has_regex:
+        for pat in rules["regex_protect"]:
+            for m in pat.finditer(mid):
+                matches.append((m.start(), m.end(), "regex", m.group(0)))
+
+    # 2. 收集片段匹配（在原文中查找所有 src 的出现位置）
+    if has_substring:
+        for sub in rules["substring"]:
+            src = sub["src"]
+            dst = sub["dst"]
+            if not src:
+                continue
+            start = 0
+            while True:
+                pos = mid.find(src, start)
+                if pos == -1:
+                    break
+                matches.append((pos, pos + len(src), "substring", dst))
+                start = pos + len(src)
 
     if not matches:
         return mid, {}
 
-    matches.sort(key=lambda x: x[0], reverse=True)
+    # 3. 按起始位置排序，合并重叠或相邻的区间
+    matches.sort(key=lambda x: x[0])
+    
+    merged = []
+    for m in matches:
+        if not merged:
+            merged.append(list(m))
+            continue
+        last = merged[-1]
+        # 如果当前区间与最后一个区间重叠或相邻（距离 <= 1），则合并
+        if m[0] <= last[1]:
+            # 合并区间：取较大的结束位置
+            # 类型优先级：regex > substring（重叠时以 regex 为准）
+            if m[2] == "regex":
+                new_type = "regex"
+                new_val = m[3]
+            elif last[2] == "regex":
+                new_type = "regex"
+                new_val = last[3]
+            else:
+                # 都是 substring，取先匹配到的（保留 merged 中的）
+                new_type = "substring"
+                new_val = last[3]
+            last[1] = max(last[1], m[1])
+            last[2] = new_type
+            last[3] = new_val
+        else:
+            merged.append(list(m))
+
+    if not merged:
+        return mid, {}
+
+    # 4. 从后往前替换（避免位置偏移）
+    merged.sort(key=lambda x: x[0], reverse=True)
 
     placeholders = {}
     counter = 0
     result = mid
-    for start, end, text in matches:
+    for start, end, mtype, value in merged:
         if api_type == "libretranslate":
             key = "<P%d>" % counter
         else:
             key = "__PO_PROTECT_%d__" % counter
-        placeholders[key] = text
+        placeholders[key] = (mtype, value)
         result = result[:start] + key + result[end:]
         counter += 1
 
     return result, placeholders
 
 def restore_from_protection(text, placeholders):
-    """将占位符还原为原始文本
+    """将占位符还原为对应文本
+    - 正则保护：还原为原始文本
+    - 片段匹配：还原为目标替换文本(dst)
     对于 LibreTranslate 的 <PN> 格式，使用正则宽松匹配（不区分大小写、容忍空格）
     对于 Google 的 __PO_PROTECT_N__ 格式，使用精确字符串替换
     """
@@ -455,13 +527,19 @@ def restore_from_protection(text, placeholders):
         def _restore_replacer(m):
             idx = int(m.group(1))
             if idx in idx_map:
-                return idx_map[idx]
+                val = idx_map[idx]
+                if isinstance(val, tuple) and len(val) == 2:
+                    return val[1]
+                return val
             return m.group(0)
         
         text = re.sub(r'<\s*[Pp]\s*(\d+)\s*>', _restore_replacer, text)
     else:
         for key, val in placeholders.items():
-            text = text.replace(key, val)
+            if isinstance(val, tuple) and len(val) == 2:
+                text = text.replace(key, val[1])
+            else:
+                text = text.replace(key, val)
     
     return text
 
