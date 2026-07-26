@@ -153,6 +153,26 @@ theme_override_styles/normal = SubResource("StyleBox_option_normal")
 theme_override_styles/pressed = SubResource("StyleBox_option_normal")
 theme_override_styles/hover = SubResource("StyleBox_option_hover")
 
+[node name="ReplaceEdit" type="LineEdit" parent="TopBar" unique_id=318985917]
+custom_minimum_size = Vector2(140, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.6, 1, 1)
+theme_override_colors/font_placeholder_color = Color(0.35, 0.6, 1, 0.35)
+theme_override_font_sizes/font_size = 13
+placeholder_text = "替换为..."
+
+[node name="ReplaceBtn" type="Button" parent="TopBar" unique_id=318985916]
+custom_minimum_size = Vector2(72, 0)
+layout_mode = 2
+theme_override_colors/font_color = Color(0.35, 0.6, 1, 0.75)
+theme_override_colors/font_pressed_color = Color(0.5, 1, 0.7, 1)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 13
+theme_override_styles/normal = SubResource("StyleBox_option_normal")
+theme_override_styles/hover = SubResource("StyleBox_option_hover")
+disabled = true
+text = "一键替换"
+
 [node name="Spacer" type="Control" parent="TopBar" unique_id=318985915]
 layout_mode = 2
 size_flags_horizontal = 3

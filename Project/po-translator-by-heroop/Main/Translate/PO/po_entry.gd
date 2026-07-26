@@ -7,11 +7,13 @@ extends Control
 signal entry_saved(entry_index: int, field: String, new_text: String)
 signal entry_hovered(entry_index: int)
 signal entry_unhovered(entry_index: int)
+signal entry_checked(entry_index: int, checked: bool)
 
-@onready var src_label: Label = $Row/SrcLabel
+@onready var src_label: RichTextLabel = $Row/SrcLabel
 @onready var src_edit: TextEdit = $Row/SrcEdit
-@onready var dst_label: Label = $Row/DstLabel
+@onready var dst_label: RichTextLabel = $Row/DstLabel
 @onready var dst_edit: TextEdit = $Row/DstEdit
+@onready var chk_select: CheckBox = $Row/ChkSelect
 @onready var blur_bg: ColorRect = $BlurBg
 @onready var backbuffer_copy: BackBufferCopy = $BackBufferCopy
 
@@ -22,6 +24,11 @@ var _edit_mode: EditMode = EditMode.NONE
 var original_src: String = ""
 var original_dst: String = ""
 var _source: String = ""  # "manual" | "rule" | "memory" | "ai" | "" = 未翻译
+
+# — 高亮缓存：上次高亮用的搜索词和原始文本 —
+var _last_search_text: String = ""
+var _last_src_text: String = ""
+var _last_dst_text: String = ""
 
 
 # --------------------- 静态工具：行高估算 ---------------------
@@ -55,13 +62,58 @@ func set_entry(msgid: String, msgstr: String, source: String, row_height: float,
 	original_src = msgid
 	original_dst = msgstr
 	_source = source
-	src_label.text = msgid
 	src_edit.text = msgid
-	dst_label.text = msgstr
 	dst_edit.text = msgstr
+	src_label.text = _escape_bbcode(msgid)
+	dst_label.text = _escape_bbcode(msgstr)
+
+	# 存储原始文本用于高亮重建
+	_last_src_text = msgid
+	_last_dst_text = msgstr
+	_last_search_text = ""
 
 	_apply_colors()
 	$Row.queue_sort()
+
+
+# --------------------- 搜索高亮 ---------------------
+
+## 对 src_label 和 dst_label 应用搜索高亮（匹配文本加灰色背景）
+func apply_search_highlight(search_text: String):
+	if search_text == _last_search_text and original_src == _last_src_text and original_dst == _last_dst_text:
+		return
+	_last_search_text = search_text
+	_last_src_text = original_src
+	_last_dst_text = original_dst
+
+	src_label.text = _build_highlighted_text(original_src, search_text)
+	dst_label.text = _build_highlighted_text(original_dst, search_text)
+
+## 构建带高亮的 BBCode 文本（不区分大小写匹配）
+func _build_highlighted_text(raw: String, search: String) -> String:
+	if search.is_empty() or raw.is_empty():
+		return _escape_bbcode(raw)
+	var result := ""
+	var lower_raw := raw.to_lower()
+	var lower_search := search.to_lower()
+	var pos := 0
+	while pos < raw.length():
+		var found := lower_raw.find(lower_search, pos)
+		if found == -1:
+			result += _escape_bbcode(raw.substr(pos))
+			break
+		# 匹配前的普通文本
+		if found > pos:
+			result += _escape_bbcode(raw.substr(pos, found - pos))
+		# 匹配的高亮文本
+		var matched := raw.substr(found, search.length())
+		result += "[bgcolor=#555555]" + _escape_bbcode(matched) + "[/bgcolor]"
+		pos = found + search.length()
+	return result
+
+## 转义 BBCode 特殊字符
+func _escape_bbcode(s: String) -> String:
+	return s.replace("[", "[lb]")
 
 
 # --------------------- 颜色 ---------------------
@@ -78,8 +130,23 @@ func _apply_colors():
 			_:        c = Color(0.3, 1, 0.5, 1)    # 默认绿色（兼容旧数据）
 	else:
 		c = Color(0.85, 0.35, 0.35, 1)  # 红色 未翻译
-	dst_label.add_theme_color_override("font_color", c)
+	dst_label.add_theme_color_override("default_color", c)
 	dst_edit.add_theme_color_override("font_color", c)
+	# 重新应用高亮以刷新颜色
+	_last_search_text = ""  # 强制重建高亮
+
+
+# --------------------- 复选框 ---------------------
+
+## 设置复选框状态（不触发信号）
+func set_checked(checked: bool):
+	chk_select.set_block_signals(true)
+	chk_select.button_pressed = checked
+	chk_select.set_block_signals(false)
+
+## 获取当前复选框状态
+func is_checked() -> bool:
+	return chk_select.button_pressed
 
 
 # --------------------- 编辑态切换 ---------------------
@@ -128,12 +195,13 @@ func _commit_and_display(field: String, new_text: String):
 	_save_field(field, new_text)
 	print("[PoEntry] PO修改完成")
 	if field == "msgid":
-		src_label.text = new_text
 		original_src = new_text
+		src_label.text = _escape_bbcode(new_text)
 	else:
-		dst_label.text = new_text
 		original_dst = new_text
-	_apply_colors()
+		dst_label.text = _escape_bbcode(new_text)
+		_apply_colors()
+	_last_search_text = ""  # 强制重建高亮
 	_switch_to_display()
 
 ## 丢弃修改并退回显示态（Esc 触发）
@@ -157,12 +225,10 @@ func _save_field(field: String, text: String):
 func _save_and_switch(save_field: String, save_text: String, target_mode: EditMode):
 	_save_field(save_field, save_text)
 	if save_field == "msgid":
-		src_label.text = save_text
 		original_src = save_text
 	else:
-		dst_label.text = save_text
 		original_dst = save_text
-	_apply_colors()
+		_apply_colors()
 	_edit_mode = EditMode.NONE  # 先改模式，防止隐藏时焦点离开触发重复保存
 	src_label.visible = true
 	src_edit.visible = false
@@ -235,6 +301,7 @@ func _on_dst_focus_exited():
 func _ready():
 	mouse_entered.connect(_on_mouse_entered)
 	mouse_exited.connect(_on_mouse_exited)
+	chk_select.toggled.connect(_on_chk_toggled)
 
 func _on_mouse_entered():
 	if _entry_index >= 0:
@@ -243,3 +310,7 @@ func _on_mouse_entered():
 func _on_mouse_exited():
 	if _entry_index >= 0:
 		entry_unhovered.emit(_entry_index)
+
+func _on_chk_toggled(checked: bool):
+	if _entry_index >= 0:
+		entry_checked.emit(_entry_index, checked)

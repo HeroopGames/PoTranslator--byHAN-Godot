@@ -39,15 +39,17 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 10
 
-[node name="SrcLabel" type="Label" parent="Row" unique_id=247320792]
+[node name="SrcLabel" type="RichTextLabel" parent="Row" unique_id=247320792]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 mouse_filter = 0
-theme_override_colors/font_color = Color(0.6, 0.85, 0.7, 1)
-theme_override_font_sizes/font_size = 14
+bbcode_enabled = true
+fit_content = true
+scroll_following = false
+theme_override_colors/default_color = Color(0.6, 0.85, 0.7, 1)
+theme_override_font_sizes/normal_font_size = 14
 autowrap_mode = 3
-vertical_alignment = 1
 
 [node name="SrcEdit" type="TextEdit" parent="Row" unique_id=247320791]
 visible = false
@@ -64,15 +66,25 @@ theme_override_colors/font_color = Color(0.3, 0.5, 0.35, 0.6)
 theme_override_font_sizes/font_size = 14
 text = "→"
 
-[node name="DstLabel" type="Label" parent="Row" unique_id=1076014667]
+[node name="ChkSelect" type="CheckBox" parent="Row" unique_id=247320793]
+layout_mode = 2
+size_flags_vertical = 1
+theme_override_colors/font_color = Color(0.5, 0.75, 0.6, 0.8)
+theme_override_colors/font_pressed_color = Color(0.7, 1, 0.85, 1)
+theme_override_colors/font_hover_color = Color(0.7, 1, 0.85, 1)
+button_pressed = false
+
+[node name="DstLabel" type="RichTextLabel" parent="Row" unique_id=1076014667]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 mouse_filter = 0
-theme_override_colors/font_color = Color(0.85, 0.35, 0.35, 1)
-theme_override_font_sizes/font_size = 14
+bbcode_enabled = true
+fit_content = true
+scroll_following = false
+theme_override_colors/default_color = Color(0.85, 0.35, 0.35, 1)
+theme_override_font_sizes/normal_font_size = 14
 autowrap_mode = 3
-vertical_alignment = 1
 
 [node name="DstEdit" type="TextEdit" parent="Row" unique_id=1076014666]
 visible = false

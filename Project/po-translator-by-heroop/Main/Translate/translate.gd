@@ -41,6 +41,9 @@ var _exact_search_text: String = ""
 var _filtered_indices: Array[int] = []
 var _filter_active: bool = false
 
+# — 复选框选中状态（key=条目索引）
+var _checked_entries: Dictionary = {}
+
 # — 虚拟列表状态
 var _entry_heights: Array[float] = []
 var _entry_y: Array[float] = []
@@ -113,6 +116,8 @@ var _api_check_timer: Timer = null
 @onready var detail_msgid_content: Label = $DetailPanel/DetailScroll/DetailVBox/MsgidContent
 @onready var detail_msgstr_content: Label = $DetailPanel/DetailScroll/DetailVBox/MsgstrContent
 @onready var detail_dirty_label: Label = $DetailPanel/DetailScroll/DetailVBox/DirtyLabel
+@onready var replace_btn: Button = $TopBar/ReplaceBtn
+@onready var replace_edit: LineEdit = $TopBar/ReplaceEdit
 @onready var detail_glow_top: ColorRect = $DetailPanel/GlowLineTop
 @onready var detail_glow_bottom: ColorRect = $DetailPanel/GlowLineBottom
 @onready var detail_scan_line: ColorRect = $DetailPanel/ScanLine
@@ -141,6 +146,7 @@ func _ready():
 	exact_search_edit.text_submitted.connect(_on_exact_search_text_submitted)
 
 	refresh_btn.pressed.connect(_on_refresh_pressed)
+	replace_btn.pressed.connect(_on_replace_pressed)
 
 	chk_all.toggled.connect(_on_all_toggled)
 	chk_ai.toggled.connect(_on_filter_toggled)
@@ -237,6 +243,7 @@ func _on_refresh_pressed():
 
 func _on_search_text_submitted(new_text: String):
 	_search_text = new_text.strip_edges()
+	replace_btn.disabled = _search_text.is_empty()
 	_apply_filter()
 
 func _on_exact_search_text_submitted(new_text: String):
@@ -291,6 +298,9 @@ func _apply_filter():
 
 	var all_checked := chk_ai.button_pressed and chk_manual.button_pressed and chk_rule.button_pressed and chk_memory.button_pressed and chk_untranslated.button_pressed and chk_empty.button_pressed
 	_filter_active = not _search_text.is_empty() or not _exact_search_text.is_empty() or not all_checked
+
+	# 每次搜索重置所有对钩为关闭状态
+	_checked_entries.clear()
 
 	# 隐藏当前可见节点，放入隐藏池（不销毁，复用）
 	_move_visible_to_hidden_pool()
@@ -611,8 +621,10 @@ func _show_entries(file_name: String):
 	_exact_search_text = ""
 	_filtered_indices.clear()
 	_filter_active = false
+	_checked_entries.clear()
 	search_edit.text = ""
 	exact_search_edit.text = ""
+	replace_btn.disabled = true
 	var data: Dictionary = _po_data.get(file_name, {})
 	var msgids: PackedStringArray = data.get("msgids", PackedStringArray())
 
@@ -678,6 +690,8 @@ func _return_to_hidden_pool(e: PoEntry):
 		e.entry_hovered.disconnect(_on_entry_hovered)
 	if e.entry_unhovered.is_connected(_on_entry_unhovered):
 		e.entry_unhovered.disconnect(_on_entry_unhovered)
+	if e.entry_checked.is_connected(_on_entry_checked):
+		e.entry_checked.disconnect(_on_entry_checked)
 	_hidden_pool.append(e)
 	while _hidden_pool.size() > MAX_HIDDEN_POOL:
 		var x: PoEntry = _hidden_pool.pop_front()
@@ -728,6 +742,8 @@ func _do_refresh_visible_rows():
 			e.entry_hovered.connect(_on_entry_hovered)
 		if not e.entry_unhovered.is_connected(_on_entry_unhovered):
 			e.entry_unhovered.connect(_on_entry_unhovered)
+		if not e.entry_checked.is_connected(_on_entry_checked):
+			e.entry_checked.connect(_on_entry_checked)
 		_fill_entry(e, _current_file_name, idx)
 		e.set_entry(
 			_get_entry_msgid(_current_file_name, idx),
@@ -736,6 +752,10 @@ func _do_refresh_visible_rows():
 			_entry_heights[row_i],
 			idx
 		)
+		# 设置复选框状态
+		e.set_checked(_checked_entries.get(idx, false))
+		# 应用搜索高亮
+		e.apply_search_highlight(_search_text)
 		e.position.y = _entry_y[row_i]
 		e.size.x = po_list_container.size.x
 
@@ -1364,3 +1384,75 @@ func _show_toast(msg: String, auto_close: bool = true):
 func _hide_toast():
 	_toast_label.visible = false
 	_toast_click_to_close = false
+
+
+# ======== 复选框 & 一键替换 ========
+
+func _on_entry_checked(entry_index: int, checked: bool):
+	if checked:
+		_checked_entries[entry_index] = true
+	else:
+		_checked_entries.erase(entry_index)
+
+func _on_replace_pressed():
+	if _search_text.is_empty() or _checked_entries.is_empty():
+		return
+
+	var data: Dictionary = _po_data.get(_current_file_name, {})
+	var msgstrs: PackedStringArray = data.get("msgstrs", PackedStringArray())
+	var msgids: PackedStringArray = data.get("msgids", PackedStringArray())
+
+	# 使用 ReplaceEdit 中的文本作为替换目标
+	var replace_with: String = replace_edit.text.strip_edges()
+	if replace_with.is_empty():
+		_show_toast("请先输入替换文本")
+		return
+
+	var lower_search := _search_text.to_lower()
+	var count := 0
+
+	for entry_idx in _checked_entries.keys():
+		var idx: int = entry_idx as int
+		if idx < 0 or idx >= msgstrs.size():
+			continue
+		var mstr: String = msgstrs[idx]
+		if mstr.is_empty():
+			continue
+
+		# 查找所有不区分大小写的匹配并替换
+		var lower_mstr := mstr.to_lower()
+		var new_mstr := ""
+		var pos := 0
+		var found_any := false
+		while pos < mstr.length():
+			var found := lower_mstr.find(lower_search, pos)
+			if found == -1:
+				new_mstr += mstr.substr(pos)
+				break
+			if found > pos:
+				new_mstr += mstr.substr(pos, found - pos)
+			new_mstr += replace_with
+			pos = found + _search_text.length()
+			found_any = true
+
+		if found_any:
+			msgstrs[idx] = new_mstr
+			_translation_source[idx] = "manual"
+			_mark_dirty(idx, "msgstr")
+			count += 1
+
+	if count > 0:
+		_dirty_files[_current_file_name] = true
+		_flush_save()
+		# 清除对钩
+		_checked_entries.clear()
+		# 刷新显示
+		_first_drawn = -1
+		_last_drawn = -1
+		_move_visible_to_hidden_pool()
+		_entry_pool.clear()
+		_do_refresh_visible_rows()
+		_show_toast("已替换 %d 条" % count)
+		_refresh_filter_counts()
+	else:
+		_show_toast("选中条目中未找到匹配文本")
