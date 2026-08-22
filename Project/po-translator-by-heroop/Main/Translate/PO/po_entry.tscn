@@ -7,6 +7,22 @@
 shader = ExtResource("2_shader")
 shader_parameter/blur_radius = 4.0
 
+[sub_resource type="StyleBoxFlat" id="StyleBox_translate"]
+content_margin_left = 6.0
+content_margin_top = 2.0
+content_margin_right = 6.0
+content_margin_bottom = 2.0
+bg_color = Color(0, 0.06, 0, 0.5)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.35, 0.6, 1, 0.5)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
 [node name="PoEntry" type="Control" unique_id=857691927]
 layout_mode = 3
 anchors_preset = 0
@@ -38,6 +54,20 @@ offset_bottom = -6.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 10
+
+[node name="TranslateBtn" type="Button" parent="Row" unique_id=247320794]
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+size_flags_vertical = 1
+theme_override_colors/font_color = Color(0.35, 0.6, 1, 0.9)
+theme_override_colors/font_hover_color = Color(0.5, 1, 0.7, 1)
+theme_override_colors/font_pressed_color = Color(0.5, 1, 0.7, 1)
+theme_override_font_sizes/font_size = 12
+theme_override_styles/normal = SubResource("StyleBox_translate")
+theme_override_styles/hover = SubResource("StyleBox_translate")
+theme_override_styles/pressed = SubResource("StyleBox_translate")
+text = "翻译"
+tooltip_text = "翻译此条目"
 
 [node name="SrcLabel" type="RichTextLabel" parent="Row" unique_id=247320792]
 layout_mode = 2

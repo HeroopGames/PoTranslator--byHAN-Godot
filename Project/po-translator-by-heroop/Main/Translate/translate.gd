@@ -44,6 +44,15 @@ var _filter_active: bool = false
 # — 复选框选中状态（key=条目索引）
 var _checked_entries: Dictionary = {}
 
+# — 单条翻译状态 —
+var _single_translate_queue: Array[int] = []
+var _single_translate_current: int = -1
+var _translating_entries: Dictionary = {}  # key=条目索引，正在翻译中
+var _failed_entries: Dictionary = {}       # key=条目索引，翻译失败
+var _single_translate_task_id: int = -1
+var _single_translate_timer: Timer = null
+var _single_translate_result_holder: Dictionary = {}
+
 # — 虚拟列表状态
 var _entry_heights: Array[float] = []
 var _entry_y: Array[float] = []
@@ -622,6 +631,12 @@ func _show_entries(file_name: String):
 	_filtered_indices.clear()
 	_filter_active = false
 	_checked_entries.clear()
+	# 清空单条翻译状态（避免跨文件错写）
+	_single_translate_queue.clear()
+	_single_translate_current = -1
+	_translating_entries.clear()
+	_failed_entries.clear()
+	_kill_single_translate_timer()
 	search_edit.text = ""
 	exact_search_edit.text = ""
 	replace_btn.disabled = true
@@ -692,6 +707,10 @@ func _return_to_hidden_pool(e: PoEntry):
 		e.entry_unhovered.disconnect(_on_entry_unhovered)
 	if e.entry_checked.is_connected(_on_entry_checked):
 		e.entry_checked.disconnect(_on_entry_checked)
+	if e.entry_translate.is_connected(_on_entry_translate):
+		e.entry_translate.disconnect(_on_entry_translate)
+	if e.entry_translate_stop.is_connected(_on_entry_translate_stop):
+		e.entry_translate_stop.disconnect(_on_entry_translate_stop)
 	_hidden_pool.append(e)
 	while _hidden_pool.size() > MAX_HIDDEN_POOL:
 		var x: PoEntry = _hidden_pool.pop_front()
@@ -744,6 +763,10 @@ func _do_refresh_visible_rows():
 			e.entry_unhovered.connect(_on_entry_unhovered)
 		if not e.entry_checked.is_connected(_on_entry_checked):
 			e.entry_checked.connect(_on_entry_checked)
+		if not e.entry_translate.is_connected(_on_entry_translate):
+			e.entry_translate.connect(_on_entry_translate)
+		if not e.entry_translate_stop.is_connected(_on_entry_translate_stop):
+			e.entry_translate_stop.connect(_on_entry_translate_stop)
 		_fill_entry(e, _current_file_name, idx)
 		e.set_entry(
 			_get_entry_msgid(_current_file_name, idx),
@@ -756,6 +779,13 @@ func _do_refresh_visible_rows():
 		e.set_checked(_checked_entries.get(idx, false))
 		# 应用搜索高亮
 		e.apply_search_highlight(_search_text)
+		# 设置翻译状态（翻译中/翻译失败覆盖显示，正常状态仅恢复按钮）
+		if _translating_entries.has(idx):
+			e.set_translating(true)
+		elif _failed_entries.has(idx):
+			e.set_translate_failed()
+		else:
+			e.set_translating(false)
 		e.position.y = _entry_y[row_i]
 		e.size.x = po_list_container.size.x
 
@@ -1018,6 +1048,8 @@ func _setup_api_options():
 	api_option.clear()
 	api_option.add_item("LibreTranslate", 0)
 	api_option.add_item("谷歌非官方API", 1)
+	api_option.add_item("百度非官方API", 2)
+	api_option.add_item("有道非官方API", 3)
 	api_option.selected = 0
 
 func _setup_lang_options():
@@ -1119,8 +1151,14 @@ func _on_translate_btn_pressed():
 		api_url = api_url_edit.text.strip_edges()
 		if api_url.is_empty():
 			api_url = "http://localhost:5000"
-	else:
+	elif api_idx == 1:
 		api_type = "google"
+		api_url = ""
+	elif api_idx == 2:
+		api_type = "baidu"
+		api_url = ""
+	else:
+		api_type = "youdao"
 		api_url = ""
 
 	# 在主线程复制 Python 脚本到临时路径（FileAccess 在 WorkerThread 中不可靠）
@@ -1291,6 +1329,17 @@ func _on_check_api_pressed() -> void:
 func _on_api_option_selected(_index: int) -> void:
 	_api_available = false
 	translate_btn.disabled = true
+	# 清空单条翻译状态，恢复条目翻译按钮可用
+	_single_translate_queue.clear()
+	_single_translate_current = -1
+	_translating_entries.clear()
+	_failed_entries.clear()
+	_kill_single_translate_timer()
+	_first_drawn = -1
+	_last_drawn = -1
+	_move_visible_to_hidden_pool()
+	_entry_pool.clear()
+	_do_refresh_visible_rows()
 	_update_api_url_visibility()
 	_check_current_api()
 
@@ -1456,3 +1505,133 @@ func _on_replace_pressed():
 		_refresh_filter_counts()
 	else:
 		_show_toast("选中条目中未找到匹配文本")
+
+
+# --------------------- 单条翻译 ---------------------
+
+## 用户点击某条目的“翻译”按钮
+func _on_entry_translate(entry_index: int):
+	if entry_index < 0 or _translating:
+		return
+	if _translating_entries.has(entry_index):
+		return
+	# 入队即标记“翻译中”，按钮显示“停止”
+	_translating_entries[entry_index] = true
+	_failed_entries.erase(entry_index)
+	_single_translate_queue.append(entry_index)
+	_first_drawn = -1
+	_last_drawn = -1
+	_move_visible_to_hidden_pool()
+	_entry_pool.clear()
+	_do_refresh_visible_rows()
+	_start_next_single_translate()
+
+## 用户点击翻译中条目的“停止”按钮
+func _on_entry_translate_stop(entry_index: int):
+	# 仅停止被点击的条目，不影响其他排队/在途条目
+	_single_translate_queue.erase(entry_index)
+	_translating_entries.erase(entry_index)
+	if _single_translate_current == entry_index:
+		_single_translate_current = -1
+		_kill_single_translate_timer()
+		_show_toast("已停止翻译")
+	# 刷新显示
+	_first_drawn = -1
+	_last_drawn = -1
+	_move_visible_to_hidden_pool()
+	_entry_pool.clear()
+	_do_refresh_visible_rows()
+	# 若停止的是在途条目，继续处理队列中的下一条
+	_start_next_single_translate()
+
+## 从队列中取下一个待翻译条目并发起后台翻译
+func _start_next_single_translate():
+	if _single_translate_current != -1:
+		return  # 当前已有翻译在途
+	if _single_translate_queue.is_empty():
+		return
+	var idx: int = _single_translate_queue.pop_front()
+	_single_translate_current = idx
+
+	var mid: String = _get_entry_msgid(_current_file_name, idx)
+	if mid.is_empty():
+		_finish_single_translate(idx, "")
+		return
+
+	var src_lang: String = _lang_list[src_lang_option.selected]["code"]
+	var target_lang: String = _lang_list[target_lang_option.selected]["code"]
+
+	var api_type: String = "google"
+	var api_url: String = ""
+	if api_option.selected == 0:
+		api_type = "libretranslate"
+		api_url = api_url_edit.text.strip_edges()
+		if api_url.is_empty():
+			api_url = "http://localhost:5000"
+
+	_single_translate_result_holder = {}
+	_single_translate_task_id = WorkerThreadPool.add_task(
+		PythonBridge.translate_single.bind(mid, src_lang, target_lang, api_type, api_url, _single_translate_result_holder)
+	)
+
+	_single_translate_timer = Timer.new()
+	_single_translate_timer.one_shot = false
+	_single_translate_timer.wait_time = 0.3
+	_single_translate_timer.timeout.connect(_poll_single_translate)
+	add_child(_single_translate_timer)
+	_single_translate_timer.start()
+
+## 轮询单条翻译结果
+func _poll_single_translate():
+	if not WorkerThreadPool.is_task_completed(_single_translate_task_id):
+		return
+	_kill_single_translate_timer()
+	var idx: int = _single_translate_current
+	if idx < 0:
+		return
+	var translated := ""
+	if _single_translate_result_holder.get("ok", false):
+		translated = str(_single_translate_result_holder.get("text", ""))
+	_finish_single_translate(idx, translated)
+
+func _kill_single_translate_timer():
+	if _single_translate_timer:
+		_single_translate_timer.stop()
+		_single_translate_timer.queue_free()
+		_single_translate_timer = null
+
+## 结束单条翻译：写入结果、保存、继续处理队列
+func _finish_single_translate(idx: int, translated_text: String):
+	_translating_entries.erase(idx)
+	if _single_translate_current == idx:
+		_single_translate_current = -1
+
+	if translated_text != "" and _current_file_name != "":
+		_failed_entries.erase(idx)
+		var data: Dictionary = _po_data.get(_current_file_name, {})
+		var msgstrs: PackedStringArray = data.get("msgstrs", PackedStringArray())
+		var msgids: PackedStringArray = data.get("msgids", PackedStringArray())
+		if idx < msgstrs.size():
+			msgstrs[idx] = translated_text
+			_translation_source[idx] = "ai"
+			if _translation_memory != null and idx < msgids.size():
+				_translation_memory.record(msgids[idx], translated_text)
+				_memory_dirty = true
+			_mark_dirty(idx, "msgstr")
+			_dirty_files[_current_file_name] = true
+			_flush_save()
+		_show_toast("已翻译: %s" % (translated_text.left(30)))
+	else:
+		_failed_entries[idx] = true
+		_show_toast("翻译失败，请检查网络或 API 设置")
+
+	# 刷新显示
+	_first_drawn = -1
+	_last_drawn = -1
+	_move_visible_to_hidden_pool()
+	_entry_pool.clear()
+	_do_refresh_visible_rows()
+	_refresh_filter_counts()
+
+	# 处理队列中的下一条
+	_start_next_single_translate()

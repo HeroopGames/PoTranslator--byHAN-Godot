@@ -81,6 +81,56 @@ try:
 except Exception as e:
     print(json.dumps({"available": false, "message": str(e)}))
 """
+	elif api_type == "baidu":
+		check_script = """
+import json, sys, urllib.request, ssl
+ctx = ssl.create_default_context()
+url = "https://fanyi.baidu.com/transapi"
+payload = urllib.parse.urlencode({"query": "test", "from": "en", "to": "zh"}).encode("utf-8")
+hdr = {"User-Agent": "Mozilla/5.0", "Referer": "https://fanyi.baidu.com/"}
+try:
+    req = urllib.request.Request(url, data=payload, headers=hdr, method="POST")
+    r = urllib.request.urlopen(req, timeout=8, context=ctx)
+    body = r.read().decode(errors="replace")
+    data = json.loads(body)
+    ok = isinstance(data, dict) and "data" in data and len(data.get("data", [])) > 0
+    print(json.dumps({"available": ok, "message": "API OK" if ok else "bad response"}))
+except Exception as e:
+    print(json.dumps({"available": false, "message": str(e)}))
+"""
+	elif api_type == "youdao":
+		check_script = """
+import json, sys, urllib.request, ssl, hashlib, time
+ctx = ssl.create_default_context()
+t = str(int(time.time() * 1000))
+salt = t
+sign = hashlib.md5(("fanyideskweb" + t + salt + "Ygy_4c=r#e#4AX^@u").encode("utf-8")).hexdigest()
+form_data = urllib.parse.urlencode({
+    "i": "test",
+    "from": "en",
+    "to": "zh-CHS",
+    "smartresult": "dict",
+    "client": "fanyideskweb",
+    "salt": salt,
+    "sign": sign,
+    "lts": t,
+    "bv": hashlib.md5("5.0 (Windows)".encode("utf-8")).hexdigest(),
+    "doctype": "json",
+    "version": "2.1",
+    "keyfrom": "fanyi.web",
+    "action": "FY_BY_REALTlME",
+}).encode("utf-8")
+hdr = {"User-Agent": "Mozilla/5.0", "Referer": "https://fanyi.youdao.com/", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
+try:
+    req = urllib.request.Request("https://fanyi.youdao.com/translate?smartresult=dict&smartresult=rule", data=form_data, headers=hdr, method="POST")
+    r = urllib.request.urlopen(req, timeout=8, context=ctx)
+    body = r.read().decode(errors="replace")
+    data = json.loads(body)
+    ok = isinstance(data, dict) and "translateResult" in data and len(data.get("translateResult", [])) > 0
+    print(json.dumps({"available": ok, "message": "API OK" if ok else "bad response"}))
+except Exception as e:
+    print(json.dumps({"available": false, "message": str(e)}))
+"""
 	else:
 		check_script = """
 import json, sys, urllib.request, ssl
@@ -88,7 +138,7 @@ url = sys.argv[1]
 ctx = ssl.create_default_context()
 hdr = {"User-Agent": "Mozilla/5.0"}
 try:
-    r = urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=10, context=ctx)
+    r = urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=8, context=ctx)
     body = r.read().decode(errors="replace")
     data = json.loads(body)
     ok = isinstance(data, list) and len(data) > 0
@@ -112,6 +162,138 @@ except Exception as e:
 	if p is Dictionary:
 		return {"available": p.get("available", false), "message": str(p.get("message", ""))}
 	return {"available": false, "message": "解析失败"}
+
+
+# ======== 单条翻译 ========
+
+## 后台线程入口：结果写入调用方传入的 result_holder，避免并发任务互相覆盖
+static func translate_single(text: String, src_lang: String, target_lang: String, api_type: String, api_url: String, result_holder: Dictionary):
+	var r := _do_translate_single(text, src_lang, target_lang, api_type, api_url)
+	result_holder["ok"] = r.get("ok", false)
+	result_holder["text"] = r.get("text", "")
+	result_holder["message"] = r.get("message", "")
+
+static func _do_translate_single(text: String, src_lang: String, target_lang: String, api_type: String, api_url: String) -> Dictionary:
+	var cmd := _find_python()
+	if cmd.is_empty():
+		return {"ok": false, "text": "", "message": "Python 不可用"}
+
+	var script := """
+import json, sys, base64, urllib.request, urllib.parse, ssl, re, hashlib, time
+text = base64.b64decode(sys.argv[1]).decode("utf-8")
+src_lang = sys.argv[2]
+target_lang = sys.argv[3]
+api_type = sys.argv[4]
+api_url = sys.argv[5] if len(sys.argv) > 5 else ""
+ctx = ssl.create_default_context()
+def conv(code):
+    m = {"zh-CN": "zh-Hans", "zh-TW": "zh-Hant", "auto": "auto"}
+    return m.get(code, code)
+def conv_baidu(code):
+    m = {"zh-CN": "zh", "zh-TW": "cht", "auto": "auto", "ja": "jp", "ko": "kor", "fr": "fra", "de": "de", "es": "spa", "pt": "pt", "ru": "ru", "ar": "ara", "th": "th", "vi": "vie", "id": "id", "it": "it", "nl": "nl", "pl": "pl", "tr": "tr", "uk": "ukr", "he": "heb"}
+    return m.get(code, code)
+def conv_youdao(code):
+    m = {"zh-CN": "zh-CHS", "zh-TW": "zh-CHT", "auto": "auto", "ja": "ja", "ko": "ko", "fr": "fr", "de": "de", "es": "es", "pt": "pt", "ru": "ru", "ar": "ar", "th": "th", "vi": "vi", "id": "id", "it": "it", "nl": "nl", "pl": "pl", "tr": "tr", "uk": "uk", "he": "he"}
+    return m.get(code, code)
+try:
+    if api_type == "libretranslate":
+        base = api_url.rstrip("/") if api_url else "http://localhost:5000"
+        url = base + "/translate"
+        payload = json.dumps({"q": text, "source": conv(src_lang), "target": conv(target_lang), "format": "text"}).encode("utf-8")
+        hdr = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json"}
+        req = urllib.request.Request(url, data=payload, headers=hdr, method="POST")
+        r = urllib.request.urlopen(req, timeout=8, context=ctx)
+        data = json.loads(r.read().decode(errors="replace"))
+        if isinstance(data, dict) and "translatedText" in data:
+            print(json.dumps({"ok": True, "text": data["translatedText"]}))
+        else:
+            print(json.dumps({"ok": False, "text": "", "message": "bad response"}))
+    elif api_type == "baidu":
+        payload = urllib.parse.urlencode({
+            "query": text,
+            "from": conv_baidu(src_lang),
+            "to": conv_baidu(target_lang),
+        }).encode("utf-8")
+        hdr = {"User-Agent": "Mozilla/5.0", "Referer": "https://fanyi.baidu.com/"}
+        r = urllib.request.urlopen(urllib.request.Request("https://fanyi.baidu.com/transapi", data=payload, headers=hdr), timeout=8, context=ctx)
+        data = json.loads(r.read().decode(errors="replace"))
+        result = ""
+        if isinstance(data, dict) and "data" in data:
+            for item in data["data"]:
+                if isinstance(item, dict) and "dst" in item:
+                    result += item["dst"]
+        if result:
+            print(json.dumps({"ok": True, "text": result}))
+        else:
+            print(json.dumps({"ok": False, "text": "", "message": "bad response"}))
+    elif api_type == "youdao":
+        t = str(int(time.time() * 1000))
+        salt = t
+        sign = hashlib.md5(("fanyideskweb" + t + salt + "Ygy_4c=r#e#4AX^@u").encode("utf-8")).hexdigest()
+        form_data = urllib.parse.urlencode({
+            "i": text,
+            "from": conv_youdao(src_lang),
+            "to": conv_youdao(target_lang),
+            "smartresult": "dict",
+            "client": "fanyideskweb",
+            "salt": salt,
+            "sign": sign,
+            "lts": t,
+            "bv": hashlib.md5("5.0 (Windows)".encode("utf-8")).hexdigest(),
+            "doctype": "json",
+            "version": "2.1",
+            "keyfrom": "fanyi.web",
+            "action": "FY_BY_REALTlME",
+        }).encode("utf-8")
+        hdr = {"User-Agent": "Mozilla/5.0", "Referer": "https://fanyi.youdao.com/", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
+        r = urllib.request.urlopen(urllib.request.Request("https://fanyi.youdao.com/translate?smartresult=dict&smartresult=rule", data=form_data, headers=hdr), timeout=8, context=ctx)
+        data = json.loads(r.read().decode(errors="replace"))
+        result = ""
+        if isinstance(data, dict) and "translateResult" in data and len(data["translateResult"]) > 0:
+            for seg in data["translateResult"][0]:
+                if isinstance(seg, dict) and "tgt" in seg:
+                    result += seg["tgt"]
+        if result:
+            print(json.dumps({"ok": True, "text": result}))
+        else:
+            print(json.dumps({"ok": False, "text": "", "message": "bad response"}))
+    else:
+        url = "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=%s&tl=%s&q=%s" % (
+            urllib.parse.quote(src_lang), urllib.parse.quote(target_lang), urllib.parse.quote(text.encode("utf-8"))
+        )
+        hdr = {"User-Agent": "Mozilla/5.0"}
+        r = urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=8, context=ctx)
+        body = r.read().decode(errors="replace")
+        data = json.loads(body)
+        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
+            parts = []
+            for seg in data[0]:
+                if isinstance(seg, list) and len(seg) > 0:
+                    parts.append(str(seg[0]))
+            print(json.dumps({"ok": True, "text": "".join(parts)}))
+        else:
+            print(json.dumps({"ok": False, "text": "", "message": "bad response"}))
+except Exception as e:
+    print(json.dumps({"ok": False, "text": "", "message": str(e)}))
+"""
+
+	var tmp_py := OS.get_user_data_dir().path_join("_po_translate_single.py")
+	var f := FileAccess.open(tmp_py, FileAccess.WRITE)
+	if f == null:
+		return {"ok": false, "text": "", "message": "无法写入脚本"}
+	f.store_string(script)
+	f.close()
+
+	var out: Array = []
+	var b64 := Marshalls.utf8_to_base64(text)
+	var ec := OS.execute(cmd, [tmp_py, b64, src_lang, target_lang, api_type, api_url], out, true)
+	DirAccess.remove_absolute(tmp_py)
+	if ec != 0 or out.is_empty():
+		return {"ok": false, "text": "", "message": "请求失败"}
+	var p = JSON.parse_string(out[0])
+	if p is Dictionary:
+		return {"ok": bool(p.get("ok", false)), "text": str(p.get("text", "")), "message": str(p.get("message", ""))}
+	return {"ok": false, "text": "", "message": "解析失败"}
 
 
 # ======== 全流程翻译（纯执行器） ========

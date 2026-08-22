@@ -88,6 +88,7 @@ script = ExtResource("1_script")
 layout_mode = 1
 
 [node name="HttpRequest" type="HTTPRequest" parent="." unique_id=1928374650]
+timeout = 15.0
 
 [node name="TopBar" type="HBoxContainer" parent="." unique_id=1864710782]
 layout_mode = 1

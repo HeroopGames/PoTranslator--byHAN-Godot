@@ -8,12 +8,15 @@ signal entry_saved(entry_index: int, field: String, new_text: String)
 signal entry_hovered(entry_index: int)
 signal entry_unhovered(entry_index: int)
 signal entry_checked(entry_index: int, checked: bool)
+signal entry_translate(entry_index: int)
+signal entry_translate_stop(entry_index: int)
 
 @onready var src_label: RichTextLabel = $Row/SrcLabel
 @onready var src_edit: TextEdit = $Row/SrcEdit
 @onready var dst_label: RichTextLabel = $Row/DstLabel
 @onready var dst_edit: TextEdit = $Row/DstEdit
 @onready var chk_select: CheckBox = $Row/ChkSelect
+@onready var translate_btn: Button = $Row/TranslateBtn
 @onready var blur_bg: ColorRect = $BlurBg
 @onready var backbuffer_copy: BackBufferCopy = $BackBufferCopy
 
@@ -21,6 +24,7 @@ enum EditMode { NONE, SRC, DST }
 
 var _entry_index: int = -1
 var _edit_mode: EditMode = EditMode.NONE
+var _is_translating: bool = false
 var original_src: String = ""
 var original_dst: String = ""
 var _source: String = ""  # "manual" | "rule" | "memory" | "ai" | "" = 未翻译
@@ -302,6 +306,7 @@ func _ready():
 	mouse_entered.connect(_on_mouse_entered)
 	mouse_exited.connect(_on_mouse_exited)
 	chk_select.toggled.connect(_on_chk_toggled)
+	translate_btn.pressed.connect(_on_translate_btn_pressed)
 
 func _on_mouse_entered():
 	if _entry_index >= 0:
@@ -314,3 +319,39 @@ func _on_mouse_exited():
 func _on_chk_toggled(checked: bool):
 	if _entry_index >= 0:
 		entry_checked.emit(_entry_index, checked)
+
+func _on_translate_btn_pressed():
+	if _entry_index < 0:
+		return
+	if _is_translating:
+		entry_translate_stop.emit(_entry_index)
+	else:
+		entry_translate.emit(_entry_index)
+
+
+# --------------------- 翻译状态 ---------------------
+
+## 设置“翻译中”状态：msgstr 显示为“翻译中。。。”，按钮变为“停止”
+func set_translating(is_translating: bool):
+	_is_translating = is_translating
+	translate_btn.disabled = false
+	if is_translating:
+		translate_btn.text = "停止"
+		dst_label.text = "翻译中。。。"
+		dst_label.add_theme_color_override("default_color", Color(0.5, 0.75, 1, 1))
+		# 退出编辑态，避免编辑中触发翻译
+		if _edit_mode == EditMode.DST:
+			_switch_to_display()
+	else:
+		translate_btn.text = "翻译"
+
+## 设置“翻译失败”状态：msgstr 显示为“翻译失败”，恢复翻译按钮可用
+func set_translate_failed():
+	_is_translating = false
+	translate_btn.disabled = false
+	translate_btn.text = "翻译"
+	dst_label.text = "翻译失败"
+	dst_label.add_theme_color_override("default_color", Color(1, 0.5, 0.4, 1))
+	# 退出编辑态，避免编辑中触发翻译
+	if _edit_mode == EditMode.DST:
+		_switch_to_display()
