@@ -1,4 +1,4 @@
-import json, sys, urllib.request, urllib.error, urllib.parse, traceback, os, zipfile, xml.etree.ElementTree as ET, re, hashlib, time
+import json, sys, urllib.request, urllib.error, urllib.parse, traceback, os, zipfile, xml.etree.ElementTree as ET, re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 po_path       = sys.argv[1]
@@ -7,7 +7,7 @@ target_lang   = sys.argv[3]
 batch_size    = int(sys.argv[4])
 progress_path = sys.argv[5]
 project_path  = sys.argv[6] if len(sys.argv) > 6 else ""
-api_type      = sys.argv[7] if len(sys.argv) > 7 else "google"
+api_type      = sys.argv[7] if len(sys.argv) > 7 else "simplytranslate"
 api_url       = sys.argv[8] if len(sys.argv) > 8 else ""
 
 result_path = progress_path.replace("_translate_progress.json", "_translate_result.json")
@@ -26,7 +26,6 @@ log("project_path=%s" % project_path)
 log("api_type=%s" % api_type)
 log("api_url=%s" % api_url)
 
-GOOGLE_ENDPOINT = "https://translate.googleapis.com/translate_a/single"
 TIMEOUT  = 15
 MAX_WORKERS = 10  # 并发 AI 翻译线程数
 HDR      = {"User-Agent": "Mozilla/5.0"}
@@ -404,11 +403,11 @@ def apply_rules(mid, ctx, ctxx, rules):
 #  AI 翻译前：用正则保护要保留的部分
 # ============================================================
 
-def protect_for_ai(mid, rules, api_type="google"):
+def protect_for_ai(mid, rules, api_type="simplytranslate"):
     """返回 (protected_text, placeholders_dict)
     protected_text 中，正则匹配和片段匹配的部分被替换为占位符
     翻译后再用 restore_from_protection 还原
-    api_type: google 使用 __PO_PROTECT_N__ 格式
+    api_type: simplytranslate / lingva 使用 __PO_PROTECT_N__ 格式
               libretranslate 使用 <PN> 格式（LibreTranslate 对短标签更友好）
     
     注意：所有保护规则一次性收集匹配项，从后往前统一替换，
@@ -509,7 +508,7 @@ def restore_from_protection(text, placeholders):
     - 正则保护：还原为原始文本
     - 片段匹配：还原为目标替换文本(dst)
     对于 LibreTranslate 的 <PN> 格式，使用正则宽松匹配（不区分大小写、容忍空格）
-    对于 Google 的 __PO_PROTECT_N__ 格式，使用精确字符串替换
+    对于 SimplyTranslate / Lingva 的 __PO_PROTECT_N__ 格式，使用精确字符串替换
     """
     if not placeholders:
         return text
@@ -575,38 +574,70 @@ def read_memory(memory_path):
 
 def translate_one(text):
     try:
-        if api_type == "libretranslate":
+        if api_type == "lingva":
+            return _translate_lingva(text)
+        elif api_type == "libretranslate":
             return _translate_libre(text)
-        elif api_type == "baidu":
-            return _translate_baidu(text)
-        elif api_type == "youdao":
-            return _translate_youdao(text)
         else:
-            return _translate_google(text)
+            return _translate_simply(text)
     except Exception as e:
         log("  translate_one ERROR: %s | text=%s" % (str(e), text[:60]))
     return ""
 
-def _translate_google(text):
+def _translate_simply(text):
+    """SimplyTranslate（本地部署）
+    GET {base}/api/translate/?engine=google&from={src}&to={tgt}&text={q}
+    响应 JSON 字段: translated_text
+    """
     try:
-        q = urllib.parse.quote(text.encode("utf-8"))
-        url = GOOGLE_ENDPOINT + "?client=gtx&dt=t&sl=%s&tl=%s&q=%s" % (
-            urllib.parse.quote(src_lang), urllib.parse.quote(target_lang), q
+        base_url = api_url.rstrip("/") if api_url else "http://localhost:5000"
+        url = base_url + "/api/translate/?engine=google&from=%s&to=%s&text=%s" % (
+            urllib.parse.quote(src_lang), urllib.parse.quote(target_lang),
+            urllib.parse.quote(text.encode("utf-8"))
         )
         req = urllib.request.Request(url, headers=HDR, method="GET")
         r = urllib.request.urlopen(req, timeout=TIMEOUT)
         body = r.read().decode(errors="replace")
         data = json.loads(body)
-        if isinstance(data, list) and len(data) > 0 and isinstance(data[0], list):
-            parts = []
-            for seg in data[0]:
-                if isinstance(seg, list) and len(seg) > 0:
-                    parts.append(str(seg[0]))
-            result = "".join(parts)
-            if result:
+        if isinstance(data, dict):
+            result = str(data.get("translated_text", "") or data.get("translated-text", ""))
+            if result.strip():
                 return result
     except Exception as e:
-        log("  _translate_google ERROR: %s | text=%s" % (str(e), text[:60]))
+        log("  _translate_simply ERROR: %s | text=%s" % (str(e), text[:60]))
+    return ""
+
+def _translate_lingva(text):
+    """LingvaTranslate（本地部署）
+    GET {base}/api/v1/{source}/{target}/{query}
+    响应 JSON 字段: translation
+    语言代码映射: zh-CN → zh, zh-TW → zh_HANT
+    """
+    try:
+        def _convert_lang(code):
+            mapping = {
+                "zh-CN": "zh",
+                "zh-TW": "zh_HANT",
+                "auto": "auto"
+            }
+            return mapping.get(code, code)
+
+        base_url = api_url.rstrip("/") if api_url else "http://localhost:3000"
+        url = base_url + "/api/v1/%s/%s/%s" % (
+            urllib.parse.quote(_convert_lang(src_lang)),
+            urllib.parse.quote(_convert_lang(target_lang)),
+            urllib.parse.quote(text.encode("utf-8"))
+        )
+        req = urllib.request.Request(url, headers=HDR, method="GET")
+        r = urllib.request.urlopen(req, timeout=TIMEOUT)
+        body = r.read().decode(errors="replace")
+        data = json.loads(body)
+        if isinstance(data, dict):
+            result = str(data.get("translation", ""))
+            if result.strip():
+                return result
+    except Exception as e:
+        log("  _translate_lingva ERROR: %s | text=%s" % (str(e), text[:60]))
     return ""
 
 def _translate_libre(text):
@@ -643,124 +674,6 @@ def _translate_libre(text):
                 return result
     except Exception as e:
         log("  _translate_libre ERROR: %s | text=%s" % (str(e), text[:60]))
-    return ""
-
-def _translate_baidu(text):
-    try:
-        def _convert_lang(code):
-            mapping = {
-                "zh-CN": "zh",
-                "zh-TW": "cht",
-                "auto": "auto",
-                "ja": "jp",
-                "ko": "kor",
-                "fr": "fra",
-                "de": "de",
-                "es": "spa",
-                "pt": "pt",
-                "ru": "ru",
-                "ar": "ara",
-                "th": "th",
-                "vi": "vie",
-                "id": "id",
-                "it": "it",
-                "nl": "nl",
-                "pl": "pl",
-                "tr": "tr",
-                "uk": "ukr",
-                "he": "heb"
-            }
-            return mapping.get(code, code)
-
-        url = "https://fanyi.baidu.com/transapi"
-        payload = urllib.parse.urlencode({
-            "query": text,
-            "from": _convert_lang(src_lang),
-            "to": _convert_lang(target_lang),
-        }).encode("utf-8")
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://fanyi.baidu.com/"
-        }
-        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        r = urllib.request.urlopen(req, timeout=TIMEOUT)
-        body = r.read().decode(errors="replace")
-        data = json.loads(body)
-        result = ""
-        if isinstance(data, dict) and "data" in data:
-            for item in data["data"]:
-                if isinstance(item, dict) and "dst" in item:
-                    result += item["dst"]
-        if result:
-            return result
-    except Exception as e:
-        log("  _translate_baidu ERROR: %s | text=%s" % (str(e), text[:60]))
-    return ""
-
-def _translate_youdao(text):
-    try:
-        def _convert_lang(code):
-            mapping = {
-                "zh-CN": "zh-CHS",
-                "zh-TW": "zh-CHT",
-                "auto": "auto",
-                "ja": "ja",
-                "ko": "ko",
-                "fr": "fr",
-                "de": "de",
-                "es": "es",
-                "pt": "pt",
-                "ru": "ru",
-                "ar": "ar",
-                "th": "th",
-                "vi": "vi",
-                "id": "id",
-                "it": "it",
-                "nl": "nl",
-                "pl": "pl",
-                "tr": "tr",
-                "uk": "uk",
-                "he": "he"
-            }
-            return mapping.get(code, code)
-
-        t = str(int(time.time() * 1000))
-        salt = t
-        sign = hashlib.md5(("fanyideskweb" + t + salt + "Ygy_4c=r#e#4AX^@u").encode("utf-8")).hexdigest()
-        form_data = urllib.parse.urlencode({
-            "i": text,
-            "from": _convert_lang(src_lang),
-            "to": _convert_lang(target_lang),
-            "smartresult": "dict",
-            "client": "fanyideskweb",
-            "salt": salt,
-            "sign": sign,
-            "lts": t,
-            "bv": hashlib.md5("5.0 (Windows)".encode("utf-8")).hexdigest(),
-            "doctype": "json",
-            "version": "2.1",
-            "keyfrom": "fanyi.web",
-            "action": "FY_BY_REALTlME",
-        }).encode("utf-8")
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": "https://fanyi.youdao.com/",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-        }
-        url = "https://fanyi.youdao.com/translate?smartresult=dict&smartresult=rule"
-        req = urllib.request.Request(url, data=form_data, headers=headers, method="POST")
-        r = urllib.request.urlopen(req, timeout=TIMEOUT)
-        body = r.read().decode(errors="replace")
-        data = json.loads(body)
-        result = ""
-        if isinstance(data, dict) and "translateResult" in data and len(data["translateResult"]) > 0:
-            for seg in data["translateResult"][0]:
-                if isinstance(seg, dict) and "tgt" in seg:
-                    result += seg["tgt"]
-        if result:
-            return result
-    except Exception as e:
-        log("  _translate_youdao ERROR: %s | text=%s" % (str(e), text[:60]))
     return ""
 
 def write_progress(done, total, current):

@@ -269,7 +269,7 @@ func _show_project_controls():
 # ====== 使用说明 / 版权内容 ======
 const HELP_TEXT: String = """【PoTranslator by HAN · 使用说明】
 
-本工具用于翻译 UE 导出的 .po 文件，支持多项目管理、xlsx 规则表驱动翻译与 API（目前仅可用LibreTranslate）。
+本工具用于翻译 UE 导出的 .po 文件，支持多项目管理、xlsx 规则表驱动翻译与 API（目前可用 SimplyTranslate / LingvaTranslate，需本地部署）。
 
 ■ 启动界面按钮
 · ？— 点击查看本使用说明
@@ -278,8 +278,9 @@ const HELP_TEXT: String = """【PoTranslator by HAN · 使用说明】
 · 打开项目 — 选择已有的 .pohtran 项目文件继续工作
 
 ■ 翻译界面按钮
-· 顶部 API 下拉框 — 选择翻译引擎（目前仅可用LibreTranslate）
-· 检测按钮 — 检测所选 API 是否可用
+· 顶部 API 下拉框 — 选择翻译引擎（SimplyTranslate 默认 http://localhost:5000；LingvaTranslate 默认 http://localhost:3000；LibreTranslate 已停用）
+· API URL 输入框 — 配置所选翻译引擎的服务地址
+· 检测按钮 — 检测所选 API 是否可用（实际发送测试翻译验证翻译成功）
 · 顶部语言下拉框 — 设置源语言（左）和目标语言（右）
 · [×] 关闭按钮 — 关闭当前项目翻译界面，返回启动界面
 · 文件名选项卡 — 切换不同 PO 文件（按需加载，点击时才解析）
@@ -315,7 +316,7 @@ PoTranslator by HAN
 
 ■ 许可范围
 在遵守本许可证的前提下，您被允许：
-· 免费使用本软件的全部功能（本软件仅提供PO操作功能，翻译功能需要额外遵守翻译API的条款，默认的非官方谷歌翻译仅供学习交流使用，正式商用需要自己接入正版API，因类似问题导致的版权纠纷作者概不负责。）
+· 免费使用本软件的全部功能（本软件仅提供PO操作功能，翻译功能需要额外遵守翻译API的条款，默认使用本地部署的 SimplyTranslate / LingvaTranslate，因类似问题导致的版权纠纷作者概不负责。）
 · 将本软件用于个人用途或组织内部非商业用途
 · 查看、学习和研究本软件源代码
 · 对源代码进行修改、调试与本地运行

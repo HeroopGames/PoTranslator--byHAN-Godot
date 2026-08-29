@@ -83,6 +83,15 @@ var _api_available: bool = false
 var _api_check_task_id: int = -1
 var _api_check_timer: Timer = null
 
+# — API URL 配置（每个 API 独立记忆输入的 URL）
+const API_DEFAULT_URLS := {
+	"simplytranslate": "http://localhost:5000",
+	"lingva": "http://localhost:3000",
+}
+var _api_url_key: String = "simplytranslate"
+var _api_url_edits: Dictionary = {}
+var _api_selected_index_backup: int = 0
+
 # — UI 节点
 @onready var api_option: OptionButton = $TopBar/ApiOption
 @onready var api_check_btn: Button = $TopBar/ApiCheckBtn
@@ -1046,10 +1055,11 @@ func _rebuild_heights_core():
 
 func _setup_api_options():
 	api_option.clear()
-	api_option.add_item("LibreTranslate", 0)
-	api_option.add_item("谷歌非官方API", 1)
-	api_option.add_item("百度非官方API", 2)
-	api_option.add_item("有道非官方API", 3)
+	api_option.add_item("SimplyTranslate", 0)
+	api_option.add_item("LingvaTranslate", 1)
+	api_option.add_item("LibreTranslate（已停用）", 2)
+	# LibreTranslate 保留但不再更新，禁止选择
+	api_option.set_item_disabled(2, true)
 	api_option.selected = 0
 
 func _setup_lang_options():
@@ -1143,23 +1153,8 @@ func _on_translate_btn_pressed():
 	var target_lang: String = _lang_list[target_lang_option.selected]["code"]
 	var progress_path := OS.get_user_data_dir().path_join("_po_translate_progress.json")
 
-	var api_idx := api_option.selected
-	var api_type: String
-	var api_url: String
-	if api_idx == 0:
-		api_type = "libretranslate"
-		api_url = api_url_edit.text.strip_edges()
-		if api_url.is_empty():
-			api_url = "http://localhost:5000"
-	elif api_idx == 1:
-		api_type = "google"
-		api_url = ""
-	elif api_idx == 2:
-		api_type = "baidu"
-		api_url = ""
-	else:
-		api_type = "youdao"
-		api_url = ""
+	var api_type := _selected_api_type()
+	var api_url := _current_api_url()
 
 	# 在主线程复制 Python 脚本到临时路径（FileAccess 在 WorkerThread 中不可靠）
 	var script_temp := PythonBridge.copy_script_to_temp()
@@ -1326,7 +1321,14 @@ func _auto_check_api() -> void:
 func _on_check_api_pressed() -> void:
 	_check_current_api()
 
-func _on_api_option_selected(_index: int) -> void:
+func _on_api_option_selected(index: int) -> void:
+	# 防止选中已停用的 LibreTranslate
+	if api_option.is_item_disabled(index):
+		api_option.selected = _api_selected_index_backup
+		return
+	_api_selected_index_backup = index
+	# 切换前保存当前 API 的 URL 输入
+	_api_url_edits[_api_url_key] = api_url_edit.text
 	_api_available = false
 	translate_btn.disabled = true
 	# 清空单条翻译状态，恢复条目翻译按钮可用
@@ -1343,10 +1345,31 @@ func _on_api_option_selected(_index: int) -> void:
 	_update_api_url_visibility()
 	_check_current_api()
 
+func _selected_api_type() -> String:
+	match api_option.selected:
+		1:
+			return "lingva"
+		_:
+			return "simplytranslate"
+
+func _current_api_url() -> String:
+	var api_type := _selected_api_type()
+	var url: String = api_url_edit.text.strip_edges()
+	if url.is_empty():
+		url = str(API_DEFAULT_URLS.get(api_type, ""))
+	return url
+
 func _update_api_url_visibility() -> void:
-	var is_libre: bool = api_option.selected == 0
-	api_url_edit.visible = is_libre
-	api_url_label.visible = is_libre
+	# SimplyTranslate / LingvaTranslate 均为自部署服务，URL 可配置
+	var api_type := _selected_api_type()
+	_api_url_key = api_type
+	if _api_url_edits.has(api_type):
+		api_url_edit.text = str(_api_url_edits[api_type])
+	else:
+		api_url_edit.text = str(API_DEFAULT_URLS.get(api_type, ""))
+	api_url_edit.placeholder_text = str(API_DEFAULT_URLS.get(api_type, ""))
+	api_url_edit.visible = true
+	api_url_label.visible = true
 
 func _check_current_api() -> void:
 	if _api_checking:
@@ -1357,17 +1380,8 @@ func _check_current_api() -> void:
 	_api_checking = true
 	_show_toast("正在检测 API...")
 
-	var api_idx := api_option.selected
-	var url: String
-	var api_type: String
-	if api_idx == 0:
-		api_type = "libretranslate"
-		url = api_url_edit.text.strip_edges()
-		if url.is_empty():
-			url = "http://localhost:5000"
-	else:
-		api_type = "google"
-		url = "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=en&tl=zh&q=test"
+	var api_type := _selected_api_type()
+	var url := _current_api_url()
 	_api_check_task_id = WorkerThreadPool.add_task(PythonBridge.check_api.bind(url, api_type))
 
 	_api_check_timer = Timer.new()
@@ -1390,17 +1404,11 @@ func _poll_api_check():
 
 	var ok: bool = result.get("available", false)
 	var msg: String
-	var api_idx := api_option.selected
+	var api_name := "SimplyTranslate" if _selected_api_type() == "simplytranslate" else "LingvaTranslate"
 	if ok:
-		if api_idx == 0:
-			msg = "API 可用"
-		else:
-			msg = "此API仅供学习交流使用，使用此API导致的一切后果作者概不负责。若有需求请购买正版谷歌API"
+		msg = "%s 检测成功：API 可用，翻译成功" % api_name
 	else:
-		if api_idx == 0:
-			msg = "请配置LibreTranslate环境"
-		else:
-			msg = "谷歌非官方API检测失败，如果在中国大陆请使用代理后尝试"
+		msg = "%s 检测失败：请检查服务是否已启动、URL 配置是否正确" % api_name
 	_api_available = ok
 
 	translate_btn.disabled = not ok or _current_file_name.is_empty()
@@ -1561,13 +1569,8 @@ func _start_next_single_translate():
 	var src_lang: String = _lang_list[src_lang_option.selected]["code"]
 	var target_lang: String = _lang_list[target_lang_option.selected]["code"]
 
-	var api_type: String = "google"
-	var api_url: String = ""
-	if api_option.selected == 0:
-		api_type = "libretranslate"
-		api_url = api_url_edit.text.strip_edges()
-		if api_url.is_empty():
-			api_url = "http://localhost:5000"
+	var api_type := _selected_api_type()
+	var api_url := _current_api_url()
 
 	_single_translate_result_holder = {}
 	_single_translate_task_id = WorkerThreadPool.add_task(
