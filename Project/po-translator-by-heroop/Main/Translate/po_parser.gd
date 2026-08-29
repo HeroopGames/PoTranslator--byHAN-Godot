@@ -289,15 +289,11 @@ static func write_file_packed(file_path: String, contexts: PackedStringArray, ms
 
 
 static func _build_po_entry(prefix: String, text: String) -> String:
+	# 单行输出（真实换行由 _escape_po 转义为 \n）：
+	# 多行折叠续行在重新读取时按"无换行拼接"合并，拆多行会丢失换行信息
 	if text == "":
 		return prefix + ' ""\n'
-	var tok := text.split("\n")
-	if tok.size() <= 1:
-		return prefix + " " + _po_quote(text) + "\n"
-	var r := prefix + " " + _po_quote(tok[0]) + "\n"
-	for j in range(1, tok.size()):
-		r += '"' + _escape_po(tok[j]) + '"\n'
-	return r
+	return prefix + " " + _po_quote(text) + "\n"
 
 
 ## 写入 PO 文件（字典数组版）：保留 header，全量序列化
@@ -325,7 +321,25 @@ static func _strip_po_string(s: String) -> String:
 	var t := s.strip_edges()
 	if t.begins_with("\"") and t.ends_with("\""):
 		t = t.substr(1, t.length() - 2)
-	return t.replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"").replace("\\\\", "\\")
+	# 单遍扫描反转义：避免链式 replace 把 \\n（字面反斜杠+n）错误解析成换行
+	var out := ""
+	var i := 0
+	while i < t.length():
+		var c := t[i]
+		if c == "\\" and i + 1 < t.length():
+			var n := t[i + 1]
+			match n:
+				"n": out += "\n"
+				"r": out += "\r"
+				"t": out += "\t"
+				"\"": out += "\""
+				"\\": out += "\\"
+				_: out += "\\" + n
+			i += 2
+		else:
+			out += c
+			i += 1
+	return out
 
 static func _po_quote(s: String) -> String:
 	return "\"" + _escape_po(s) + "\""
@@ -367,21 +381,10 @@ static func _read_header(file_path: String) -> String:
 	return ""
 
 static func _format_po_entry(prefix: String, text: String) -> String:
+	# 单行输出，理由同 _build_po_entry
 	if text == "":
 		return prefix + " \"\"\n"
-	var lines := text.split("\n")
-	if lines.size() <= 1:
-		return prefix + " " + _po_quote(text) + "\n"
-
-	var result := prefix + " " + _po_quote(lines[0]) + "\n"
-	var last := lines.size() - 1
-	for i in range(1, last):
-		result += "\"" + _escape_po(lines[i]) + "\"\n"
-	if lines[last] != "":
-		result += "\"" + _escape_po(lines[last]) + "\"\n"
-	else:
-		result += "\"\"\n"
-	return result
+	return prefix + " " + _po_quote(text) + "\n"
 
 static func _slurp_multiline(file: FileAccess):
 	while not file.eof_reached():

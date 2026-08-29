@@ -35,6 +35,32 @@ var _last_src_text: String = ""
 var _last_dst_text: String = ""
 
 
+# --------------------- 静态工具：换行归一化 ---------------------
+
+## 把文本中的字面 \n（反斜杠+n 两字符）转换为真实换行符；
+## \\n（双反斜杠+n）表示字面反斜杠，保持不变。
+## 内部统一以真实换行符为准，写 PO 文件时由 PoParser 转回 \n 转义。
+## 注意：必须用单遍扫描实现——不能用 NUL 占位符替换法，
+## Godot 会把脚本中的 NUL 字符字面量折叠进编译产物，触发加载期 Unicode 报错。
+static func normalize_newlines(s: String) -> String:
+	var out := ""
+	var i := 0
+	while i < s.length():
+		var c := s[i]
+		if c == "\\" and i + 1 < s.length():
+			var n := s[i + 1]
+			match n:
+				"n": out += "\n"
+				"t": out += "\t"
+				"\\": out += "\\"
+				_: out += c + n
+			i += 2
+		else:
+			out += c
+			i += 1
+	return out
+
+
 # --------------------- 静态工具：行高估算 ---------------------
 
 ## 估算条目行高度（msgid 与 msgstr 取行数较大者）
@@ -196,6 +222,7 @@ func _update_blur_rect():
 
 ## 保存修改并退回显示态（Enter / 焦点离开 触发）
 func _commit_and_display(field: String, new_text: String):
+	new_text = normalize_newlines(new_text)
 	_save_field(field, new_text)
 	print("[PoEntry] PO修改完成")
 	if field == "msgid":
@@ -227,6 +254,7 @@ func _save_field(field: String, text: String):
 
 ## 保存当前编辑字段后切换到另一字段的编辑态
 func _save_and_switch(save_field: String, save_text: String, target_mode: EditMode):
+	save_text = normalize_newlines(save_text)
 	_save_field(save_field, save_text)
 	if save_field == "msgid":
 		original_src = save_text

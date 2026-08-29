@@ -38,7 +38,20 @@ def strip_po_string(s):
     t = s.strip()
     if t.startswith('"') and t.endswith('"'):
         t = t[1:-1]
-    return t.replace("\\n","\n").replace("\\r","\r").replace("\\t","\t").replace('\\"','"').replace("\\\\","\\")
+    # 单遍扫描反转义：避免链式 replace 把 \\\\n（字面反斜杠+n）错误解析成换行
+    out = []
+    i = 0
+    n = len(t)
+    esc_map = {"n": "\n", "r": "\r", "t": "\t", '"': '"', "\\": "\\"}
+    while i < n:
+        c = t[i]
+        if c == "\\" and i + 1 < n:
+            out.append(esc_map.get(t[i+1], "\\" + t[i+1]))
+            i += 2
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
 
 def escape_po(s):
     return s.replace("\\","\\\\").replace('"','\\"').replace("\n","\\n").replace("\r","\\r").replace("\t","\\t")
@@ -112,12 +125,10 @@ def _detect_newline(raw):
     return "\n"
 
 def _build_po_entry(prefix,text,newline="\n"):
+    # 单行输出（真实换行由 escape_po 转义为 \n）：
+    # 多行折叠续行在重新读取时按"无换行拼接"合并，拆多行会丢失换行信息
     if text=="": return prefix+' ""'+newline
-    tok=text.split("\n")
-    if len(tok)<=1: return prefix+" "+po_quote(text)+newline
-    r=prefix+" "+po_quote(tok[0])+newline
-    for t in tok[1:]: r+='"'+escape_po(t)+'"'+newline
-    return r
+    return prefix+" "+po_quote(text)+newline
 
 def replace_msgstr_inplace(file_path,entries,header):
     with open(file_path,"r",encoding="utf-8",newline="") as f: raw=f.read()

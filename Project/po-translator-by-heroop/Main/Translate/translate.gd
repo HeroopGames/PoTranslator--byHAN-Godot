@@ -574,8 +574,16 @@ func _scroll_to_msgid(msgid_fragment: String):
 	# 从后往前找，因为翻译是从前往后推进的，msgid_fragment 是最新完成的条目
 	for idx in range(msgids.size() - 1, -1, -1):
 		if msgids[idx].begins_with(msgid_fragment):
-			var target_y := maxi(0, (idx - 5) * ROW_HEIGHT)
-			content_scroll.scroll_vertical = int(target_y)
+			# 用行偏移表定位（行高可变）
+			var row := idx
+			if _filter_active:
+				row = _filtered_indices.find(idx)
+				if row < 0:
+					return
+			var target_y := 0.0
+			if row >= 5:
+				target_y = _entry_y[row - 5]
+			content_scroll.scroll_vertical = int(maxf(0.0, target_y))
 			return
 
 ## 后台线程入口：纯静态解析，不访问场景树，线程安全
@@ -667,7 +675,33 @@ func _on_tab_changed(file_name: String):
 	translate_progress_box.visible = false
 
 
-# ======== 虚拟列表（固定行高，避免逐条 measure_height 卡死） ========
+# ======== 虚拟列表（单行固定行高，含换行条目按内容自动增高） ========
+
+## 行高测量缓存（key = msgid + \u241f + msgstr，用可打印分隔符避免 NUL 字面量）；宽度变化时整体失效
+var _height_cache: Dictionary = {}
+var _height_cache_width: float = 0.0
+
+## 计算条目行高：无显式换行的条目用固定行高（避免全表逐条测量卡死），
+## 含真实换行符的条目按字体换行块高度测量
+func _measure_entry_height(msgid: String, msgstr: String) -> float:
+	if not msgid.contains("\n") and not msgstr.contains("\n"):
+		return ROW_HEIGHT
+	var full_w := po_list_container.size.x
+	if full_w <= 0:
+		full_w = content_scroll.size.x
+	if full_w <= 0:
+		full_w = size.x
+	if full_w <= 0:
+		return ROW_HEIGHT
+	var key := msgid + "\u241f" + msgstr
+	if _height_cache_width != full_w:
+		_height_cache.clear()
+		_height_cache_width = full_w
+	elif _height_cache.has(key):
+		return _height_cache[key]
+	var h: float = PoEntry.measure_height(msgid, msgstr, full_w)
+	_height_cache[key] = h
+	return h
 
 func _show_entries(file_name: String):
 	_current_file_name = file_name
@@ -689,6 +723,7 @@ func _show_entries(file_name: String):
 	replace_btn.disabled = true
 	var data: Dictionary = _po_data.get(file_name, {})
 	var msgids: PackedStringArray = data.get("msgids", PackedStringArray())
+	var msgstrs: PackedStringArray = data.get("msgstrs", PackedStringArray())
 
 	# 隐藏当前可见节点，放入隐藏池（不销毁）
 	_move_visible_to_hidden_pool()
@@ -696,7 +731,7 @@ func _show_entries(file_name: String):
 	_first_drawn = -1
 	_last_drawn = -1
 
-	# 固定行高，避免逐条 measure_height 导致大文件卡死
+	# 行高：单行条目固定，含换行条目按内容测量
 	_entry_heights.clear()
 	_entry_y.clear()
 	var count := msgids.size()
@@ -704,9 +739,11 @@ func _show_entries(file_name: String):
 	_entry_y.resize(count)
 	var y_acc := 0.0
 	for idx in count:
-		_entry_heights[idx] = ROW_HEIGHT
+		var mstr: String = msgstrs[idx] if idx < msgstrs.size() else ""
+		var h := _measure_entry_height(msgids[idx], mstr)
+		_entry_heights[idx] = h
 		_entry_y[idx] = y_acc
-		y_acc += ROW_HEIGHT
+		y_acc += h
 
 	po_list_container.custom_minimum_size.y = y_acc
 	content_scroll.scroll_vertical = 0
@@ -897,6 +934,7 @@ func _on_entry_saved(entry_index: int, field: String, new_text: String):
 
 	_dirty_files[_current_file_name] = true
 	_flush_save()
+	_rebuild_heights_core()
 	_do_refresh_visible_rows()
 	_refresh_filter_counts()
 	if _detail_hover_idx == entry_index:
@@ -1072,19 +1110,30 @@ func _rebuild_heights_core():
 	_entry_y.clear()
 	var y_acc := 0.0
 
-	# 固定行高，避免逐条 measure_height 卡死
+	# 行高：单行条目固定，含换行条目按内容测量
 	var count: int
+	var msgids: PackedStringArray = PackedStringArray()
+	var msgstrs: PackedStringArray = PackedStringArray()
 	if _filter_active:
 		count = _filtered_indices.size()
-	else:
 		var data: Dictionary = _po_data.get(_current_file_name, {})
-		count = data.get("msgids", PackedStringArray()).size()
+		msgids = data.get("msgids", PackedStringArray())
+		msgstrs = data.get("msgstrs", PackedStringArray())
+	else:
+		var data2: Dictionary = _po_data.get(_current_file_name, {})
+		msgids = data2.get("msgids", PackedStringArray())
+		msgstrs = data2.get("msgstrs", PackedStringArray())
+		count = msgids.size()
 	_entry_heights.resize(count)
 	_entry_y.resize(count)
-	for idx in count:
-		_entry_heights[idx] = ROW_HEIGHT
-		_entry_y[idx] = y_acc
-		y_acc += ROW_HEIGHT
+	for i in count:
+		var idx: int = _filtered_indices[i] if _filter_active else i
+		var mid: String = msgids[idx] if idx < msgids.size() else ""
+		var mstr: String = msgstrs[idx] if idx < msgstrs.size() else ""
+		var h := _measure_entry_height(mid, mstr)
+		_entry_heights[i] = h
+		_entry_y[i] = y_acc
+		y_acc += h
 
 	po_list_container.custom_minimum_size.y = y_acc
 
@@ -1547,8 +1596,8 @@ func _on_replace_pressed():
 	var msgstrs: PackedStringArray = data.get("msgstrs", PackedStringArray())
 	var msgids: PackedStringArray = data.get("msgids", PackedStringArray())
 
-	# 使用 ReplaceEdit 中的文本作为替换目标
-	var replace_with: String = replace_edit.text.strip_edges()
+	# 使用 ReplaceEdit 中的文本作为替换目标（字面 \n 归一化为真实换行）
+	var replace_with: String = PoEntry.normalize_newlines(replace_edit.text.strip_edges())
 	if replace_with.is_empty():
 		_show_toast("请先输入替换文本")
 		return
@@ -1591,7 +1640,8 @@ func _on_replace_pressed():
 		_flush_save()
 		# 清除对钩
 		_checked_entries.clear()
-		# 刷新显示
+		# 刷新显示（替换文本可能引入换行，先重建行高）
+		_rebuild_heights_core()
 		_first_drawn = -1
 		_last_drawn = -1
 		_move_visible_to_hidden_pool()
@@ -1721,7 +1771,8 @@ func _finish_single_translate(idx: int, translated_text: String):
 		_failed_entries[idx] = true
 		_show_toast("翻译失败，请检查网络或 API 设置")
 
-	# 刷新显示
+	# 刷新显示（行高可能因换行变化，先重建）
+	_rebuild_heights_core()
 	_first_drawn = -1
 	_last_drawn = -1
 	_move_visible_to_hidden_pool()
