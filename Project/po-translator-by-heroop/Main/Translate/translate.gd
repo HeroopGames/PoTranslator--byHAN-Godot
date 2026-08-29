@@ -82,6 +82,12 @@ var _api_checking: bool = false
 var _api_available: bool = false
 var _api_check_task_id: int = -1
 var _api_check_timer: Timer = null
+var _api_check_result_holder: Dictionary = {}
+
+# — 一键翻译任务（用于取消/关闭时释放 WorkerThreadPool 槽位）
+var _translate_task_id: int = -1
+# 尚未被 wait_for_task_completion 收集的已完成/在途任务 id
+var _orphan_tasks: Array[int] = []
 
 # — API URL 配置（每个 API 独立记忆输入的 URL）
 const API_DEFAULT_URLS := {
@@ -151,6 +157,26 @@ func _notification(what: int):
 		if _translating:
 			PythonBridge.cancel_translate()
 
+func _exit_tree():
+	# 节点退出前回收所有在途任务，确保 WorkerThreadPool 线程槽全部释放，
+	# 否则槽位泄漏会在后续 add_task 时永久阻塞主线程（表现为软件/系统卡死）
+	_kill_api_check_timer()
+	_kill_single_translate_timer()
+	_kill_progress_timer()
+	if _api_check_task_id >= 0:
+		_release_task(_api_check_task_id)
+		_api_check_task_id = -1
+	if _single_translate_task_id >= 0:
+		_release_task(_single_translate_task_id)
+		_single_translate_task_id = -1
+	if _translate_task_id >= 0:
+		PythonBridge.cancel_translate()
+		_release_task(_translate_task_id)
+		_translate_task_id = -1
+	for tid in _orphan_tasks:
+		_release_task(tid)
+	_orphan_tasks.clear()
+
 func _ready():
 	clear_msgstr_btn.button_down.connect(_on_clear_btn_down)
 	clear_msgstr_btn.button_up.connect(_on_clear_btn_up)
@@ -191,6 +217,7 @@ func _ready():
 	add_child(_toast_label)
 
 func _process(delta: float):
+	_reap_orphan_tasks()
 	if _pending_refresh:
 		_pending_refresh = false
 		_do_refresh_visible_rows()
@@ -236,7 +263,16 @@ func _on_close_pressed():
 		_cancel_requested = true
 		PythonBridge.cancel_translate()
 		_kill_translate_task("")
+	# 关闭前同步回收在途任务，保证线程槽全部释放（检测≤3s、单条翻译≤8s，均会自然结束）
 	_kill_api_check_timer()
+	if _api_check_task_id >= 0:
+		_release_task(_api_check_task_id)
+		_api_check_task_id = -1
+		_api_checking = false
+	_kill_single_translate_timer()
+	if _single_translate_task_id >= 0:
+		_release_task(_single_translate_task_id)
+		_single_translate_task_id = -1
 	_flush_save()
 	if _translation_memory != null and _memory_dirty:
 		_translation_memory.save()
@@ -646,6 +682,8 @@ func _show_entries(file_name: String):
 	_translating_entries.clear()
 	_failed_entries.clear()
 	_kill_single_translate_timer()
+	_abandon_task(_single_translate_task_id)
+	_single_translate_task_id = -1
 	search_edit.text = ""
 	exact_search_edit.text = ""
 	replace_btn.disabled = true
@@ -1163,9 +1201,12 @@ func _on_translate_btn_pressed():
 		_finish_translation()
 		return
 
+	# 主线程先重置取消标志，再提交任务（避免与后台线程竞态）
+	PythonBridge.reset_cancel()
 	var task_id := WorkerThreadPool.add_task(
 		PythonBridge.run_full_translate.bind(file_path, src_lang, target_lang, TRANSLATE_BATCH_SIZE, progress_path, script_temp, _project_path, api_type, api_url)
 	)
+	_translate_task_id = task_id
 
 	# 启动进度轮询
 	_progress_poll_timer = Timer.new()
@@ -1179,6 +1220,7 @@ func _on_translate_btn_pressed():
 func _poll_progress(task_id: int, progress_path: String, po_file_path: String):
 	if _cancel_requested:
 		PythonBridge.cancel_translate()
+		# _kill_translate_task 内部会等待 worker 线程退出并释放任务槽（最多约 200ms）
 		_kill_translate_task(progress_path)
 		# 重新加载 PO 数据（Python 可能已写入部分结果到磁盘）
 		_po_data.erase(_current_file_name)
@@ -1213,6 +1255,8 @@ func _poll_progress(task_id: int, progress_path: String, po_file_path: String):
 		return
 
 	# 任务完成，直接验证 PO 文件内容（Python 已原地写回）
+	_release_task(task_id)
+	_translate_task_id = -1
 	_kill_progress_timer()
 
 	# 从 result 文件读取翻译来源信息
@@ -1268,6 +1312,10 @@ func _poll_progress(task_id: int, progress_path: String, po_file_path: String):
 
 func _kill_translate_task(progress_path: String):
 	_kill_progress_timer()
+	# 子进程已被 kill（cancel_translate），等待 worker 线程退出并释放任务槽
+	if _translate_task_id >= 0:
+		_release_task(_translate_task_id)
+		_translate_task_id = -1
 	if not progress_path.is_empty() and FileAccess.file_exists(progress_path):
 		DirAccess.remove_absolute(progress_path)
 	_finish_translation()
@@ -1337,6 +1385,8 @@ func _on_api_option_selected(index: int) -> void:
 	_translating_entries.clear()
 	_failed_entries.clear()
 	_kill_single_translate_timer()
+	_abandon_task(_single_translate_task_id)
+	_single_translate_task_id = -1
 	_first_drawn = -1
 	_last_drawn = -1
 	_move_visible_to_hidden_pool()
@@ -1373,7 +1423,12 @@ func _update_api_url_visibility() -> void:
 
 func _check_current_api() -> void:
 	if _api_checking:
-		return
+		# 上一次检测仍在进行：放弃旧任务（登记回收线程槽），改用新检测，
+		# 否则切换 API 后新检测永远不发起、旧结果还会张冠李戴
+		_kill_api_check_timer()
+		_abandon_task(_api_check_task_id)
+		_api_check_task_id = -1
+		_api_checking = false
 	api_check_btn.disabled = true
 	api_check_btn.text = "检测中..."
 	translate_btn.disabled = true
@@ -1382,7 +1437,8 @@ func _check_current_api() -> void:
 
 	var api_type := _selected_api_type()
 	var url := _current_api_url()
-	_api_check_task_id = WorkerThreadPool.add_task(PythonBridge.check_api.bind(url, api_type))
+	_api_check_result_holder = {}
+	_api_check_task_id = WorkerThreadPool.add_task(PythonBridge.check_api.bind(url, api_type, _api_check_result_holder))
 
 	_api_check_timer = Timer.new()
 	_api_check_timer.one_shot = false
@@ -1395,8 +1451,12 @@ func _poll_api_check():
 	if not WorkerThreadPool.is_task_completed(_api_check_task_id):
 		return
 
+	# 必须收集已完成任务，否则 WorkerThreadPool 线程槽永不释放，
+	# 反复检测/翻译会耗尽线程池并导致 add_task 阻塞主线程（系统卡死根因）
+	_release_task(_api_check_task_id)
+	_api_check_task_id = -1
 	_kill_api_check_timer()
-	var result: Dictionary = PythonBridge._api_check_result
+	var result: Dictionary = _api_check_result_holder
 
 	api_check_btn.disabled = false
 	api_check_btn.text = "检测API"
@@ -1422,6 +1482,34 @@ func _kill_api_check_timer():
 		_api_check_timer.stop()
 		_api_check_timer.queue_free()
 		_api_check_timer = null
+
+## 收集并释放 WorkerThreadPool 任务槽。
+## Godot 的 WorkerThreadPool 要求每个 add_task 返回的 id 最终必须调用一次
+## wait_for_task_completion，否则该线程槽永久占用。反复检测/翻译会耗尽线程池，
+## 后续 add_task 将阻塞调用线程（主线程），表现为整个软件乃至系统卡死。
+## 调用前任务应已完成（轮询确认）或子进程已被 kill，避免长时间阻塞主线程。
+func _release_task(task_id: int):
+	if task_id < 0:
+		return
+	WorkerThreadPool.wait_for_task_completion(task_id)
+
+## 放弃一个仍在执行的任务：登记到孤儿列表，由 _process 非阻塞回收，
+## 保证线程槽最终释放（不能在主线程 wait，否则会卡住 UI 数秒）
+func _abandon_task(task_id: int):
+	if task_id >= 0 and not (task_id in _orphan_tasks):
+		_orphan_tasks.append(task_id)
+
+## 非阻塞回收已完成的孤儿任务
+func _reap_orphan_tasks():
+	if _orphan_tasks.is_empty():
+		return
+	var i := _orphan_tasks.size() - 1
+	while i >= 0:
+		var tid: int = _orphan_tasks[i]
+		if WorkerThreadPool.is_task_completed(tid):
+			_release_task(tid)
+			_orphan_tasks.remove_at(i)
+		i -= 1
 
 
 # ======== Toast ========
@@ -1542,6 +1630,9 @@ func _on_entry_translate_stop(entry_index: int):
 	if _single_translate_current == entry_index:
 		_single_translate_current = -1
 		_kill_single_translate_timer()
+		# 在途任务无法取消，登记回收以免泄漏线程槽
+		_abandon_task(_single_translate_task_id)
+		_single_translate_task_id = -1
 		_show_toast("已停止翻译")
 	# 刷新显示
 	_first_drawn = -1
@@ -1588,6 +1679,8 @@ func _start_next_single_translate():
 func _poll_single_translate():
 	if not WorkerThreadPool.is_task_completed(_single_translate_task_id):
 		return
+	_release_task(_single_translate_task_id)
+	_single_translate_task_id = -1
 	_kill_single_translate_timer()
 	var idx: int = _single_translate_current
 	if idx < 0:

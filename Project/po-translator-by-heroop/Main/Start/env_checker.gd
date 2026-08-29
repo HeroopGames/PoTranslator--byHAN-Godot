@@ -16,20 +16,16 @@ func run_check():
 	has_openpyxl = false
 
 	var output = []
+	# read_output=true 时 Godot 会把 stdout 与 stderr 一起收集进 output，
+	# 因此 python --version 输出到 stderr 也能读到；
+	# 旧代码再跑一次非阻塞的 python --version 读 stderr，既多余又会泄漏进程句柄，已移除
 	var exit_code = OS.execute("python", ["--version"], output, true)
-	# output[0] 是 stdout 文本
+	# output[0] 是输出文本
 	match exit_code:
 		0:
 			if output.size() > 0 and output[0].length() > 0:
 				has_python = true
 				python_version = output[0].strip_edges()
-			else:
-				# 有时 python 版本输出到 stderr
-				var err_output = []
-				OS.execute("python", ["--version"], err_output, false)
-				if err_output.size() > 0 and err_output[0].length() > 0:
-					has_python = true
-					python_version = err_output[0].strip_edges()
 		_:
 			# 试试 python3
 			var output3 = []
