@@ -7,7 +7,10 @@ const PoParser = preload("res://Main/Translate/po_parser.gd")
 const PoEntryScene = preload("res://Main/Translate/PO/po_entry.tscn")
 const PythonBridge = preload("res://Main/Translate/python_http_bridge.gd")
 const TranslationMemory = preload("res://Main/Translate/translation_memory.gd")
+const RuleEngineScript = preload("res://Main/Translate/translate_table_rule.gd")
 const ROW_HEIGHT: float = 56.0
+# 条目右侧留白，避免文字被列表整体滚动条遮住
+const ROW_RIGHT_GAP: float = 20.0
 const MAX_HIDDEN_POOL: int = 120
 const TRANSLATE_BATCH_SIZE: int = 10
 const PROGRESS_POLL_MS: int = 300
@@ -30,6 +33,11 @@ var _translation_source: Dictionary = {}
 # — 翻译记忆
 var _translation_memory: RefCounted = null
 var _memory_dirty: bool = false
+
+# — Excel 翻译规则（单条翻译时优先于机翻）
+var _rule_engine: RefCounted = null
+var _rule_engine_file: String = ""
+var _single_translate_pmap: Dictionary = {}
 
 # — 加载状态
 var _loading_file: bool = false
@@ -91,10 +99,11 @@ var _orphan_tasks: Array[int] = []
 
 # — API URL 配置（每个 API 独立记忆输入的 URL）
 const API_DEFAULT_URLS := {
+	"google": "https://clients5.google.com",
 	"simplytranslate": "http://localhost:5000",
 	"lingva": "http://localhost:3000",
 }
-var _api_url_key: String = "simplytranslate"
+var _api_url_key: String = "google"
 var _api_url_edits: Dictionary = {}
 var _api_selected_index_backup: int = 0
 
@@ -693,6 +702,7 @@ func _measure_entry_height(msgid: String, msgstr: String) -> float:
 		full_w = size.x
 	if full_w <= 0:
 		return ROW_HEIGHT
+	full_w = maxf(1.0, full_w - ROW_RIGHT_GAP)
 	var key := msgid + "\u241f" + msgstr
 	if _height_cache_width != full_w:
 		_height_cache.clear()
@@ -795,6 +805,10 @@ func _return_to_hidden_pool(e: PoEntry):
 		e.entry_translate.disconnect(_on_entry_translate)
 	if e.entry_translate_stop.is_connected(_on_entry_translate_stop):
 		e.entry_translate_stop.disconnect(_on_entry_translate_stop)
+	if e.entry_height_changed.is_connected(_on_entry_height_changed):
+		e.entry_height_changed.disconnect(_on_entry_height_changed)
+	if e.entry_edit_finished.is_connected(_on_entry_edit_finished):
+		e.entry_edit_finished.disconnect(_on_entry_edit_finished)
 	_hidden_pool.append(e)
 	while _hidden_pool.size() > MAX_HIDDEN_POOL:
 		var x: PoEntry = _hidden_pool.pop_front()
@@ -851,6 +865,10 @@ func _do_refresh_visible_rows():
 			e.entry_translate.connect(_on_entry_translate)
 		if not e.entry_translate_stop.is_connected(_on_entry_translate_stop):
 			e.entry_translate_stop.connect(_on_entry_translate_stop)
+		if not e.entry_height_changed.is_connected(_on_entry_height_changed):
+			e.entry_height_changed.connect(_on_entry_height_changed)
+		if not e.entry_edit_finished.is_connected(_on_entry_edit_finished):
+			e.entry_edit_finished.connect(_on_entry_edit_finished)
 		_fill_entry(e, _current_file_name, idx)
 		e.set_entry(
 			_get_entry_msgid(_current_file_name, idx),
@@ -871,7 +889,7 @@ func _do_refresh_visible_rows():
 		else:
 			e.set_translating(false)
 		e.position.y = _entry_y[row_i]
-		e.size.x = po_list_container.size.x
+		e.size.x = maxf(1.0, po_list_container.size.x - ROW_RIGHT_GAP)
 
 func _find_row_by_y(y: float) -> int:
 	var lo := 0
@@ -883,6 +901,55 @@ func _find_row_by_y(y: float) -> int:
 		else:
 			hi = mid - 1
 	return lo
+
+## 查找条目在当前可见行中的行号（-1 表示不可见）
+func _find_visible_row(entry_index: int) -> int:
+	if _first_drawn < 0 or _last_drawn < _first_drawn:
+		return -1
+	for row_i in range(_first_drawn, _last_drawn + 1):
+		var idx: int = _filtered_indices[row_i] if _filter_active else row_i
+		if idx == entry_index:
+			return row_i
+	return -1
+
+## 编辑中文本变长：按新行高重排后续行位置（避免总滚动条与条目内滚动条重叠）
+func _on_entry_height_changed(entry_index: int, height: float):
+	var row_i := _find_visible_row(entry_index)
+	_set_row_height(row_i, height)
+
+## 退出编辑：按保存后的文本重算该行常规高度
+func _on_entry_edit_finished(entry_index: int):
+	var row_i := _find_visible_row(entry_index)
+	if row_i < 0:
+		return
+	var mid := _get_entry_msgid(_current_file_name, entry_index)
+	var mstr := _get_entry_msgstr(_current_file_name, entry_index)
+	var h := _measure_entry_height(mid, mstr)
+	_set_row_height(row_i, h)
+	# 同步条目自身尺寸（退出编辑后不再保留编辑态增高）
+	var pool_i := row_i - _first_drawn
+	if pool_i >= 0 and pool_i < _entry_pool.size():
+		var e: PoEntry = _entry_pool[pool_i]
+		e.custom_minimum_size.y = h
+		e.size.y = h
+
+## 修改指定行的行高并重算后续行位置
+func _set_row_height(row_i: int, height: float):
+	if row_i < 0 or row_i >= _entry_heights.size():
+		return
+	if is_equal_approx(_entry_heights[row_i], height):
+		return
+	_entry_heights[row_i] = height
+	var y_acc := _entry_y[row_i]
+	for i in range(row_i, _entry_heights.size()):
+		_entry_y[i] = y_acc
+		y_acc += _entry_heights[i]
+	po_list_container.custom_minimum_size.y = y_acc
+	for i in _entry_pool.size():
+		var r := _first_drawn + i
+		if r >= _entry_y.size():
+			break
+		_entry_pool[i].position.y = _entry_y[r]
 
 
 # ======== 数据访问（内联取值，避免每帧创建 Dictionary） ========
@@ -1142,11 +1209,12 @@ func _rebuild_heights_core():
 
 func _setup_api_options():
 	api_option.clear()
-	api_option.add_item("SimplyTranslate", 0)
-	api_option.add_item("LingvaTranslate", 1)
-	api_option.add_item("LibreTranslate（已停用）", 2)
+	api_option.add_item("Google（非官方）", 0)
+	api_option.add_item("SimplyTranslate", 1)
+	api_option.add_item("LingvaTranslate", 2)
+	api_option.add_item("LibreTranslate（已停用）", 3)
 	# LibreTranslate 保留但不再更新，禁止选择
-	api_option.set_item_disabled(2, true)
+	api_option.set_item_disabled(3, true)
 	api_option.selected = 0
 
 func _setup_lang_options():
@@ -1446,10 +1514,22 @@ func _on_api_option_selected(index: int) -> void:
 
 func _selected_api_type() -> String:
 	match api_option.selected:
-		1:
+		0:
+			return "google"
+		2:
 			return "lingva"
 		_:
+			# 1 = SimplyTranslate；3 为已停用项，不可达
 			return "simplytranslate"
+
+func _selected_api_name() -> String:
+	match _selected_api_type():
+		"google":
+			return "Google（非官方）"
+		"lingva":
+			return "LingvaTranslate"
+		_:
+			return "SimplyTranslate"
 
 func _current_api_url() -> String:
 	var api_type := _selected_api_type()
@@ -1459,14 +1539,22 @@ func _current_api_url() -> String:
 	return url
 
 func _update_api_url_visibility() -> void:
-	# SimplyTranslate / LingvaTranslate 均为自部署服务，URL 可配置
+	# SimplyTranslate / LingvaTranslate 为自部署服务，URL 可配置；
+	# Google 非官方接口地址固定，输入框置灰且不可编辑
 	var api_type := _selected_api_type()
 	_api_url_key = api_type
-	if _api_url_edits.has(api_type):
+	var is_google: bool = api_type == "google"
+	if is_google:
+		api_url_edit.text = str(API_DEFAULT_URLS.get("google", ""))
+	elif _api_url_edits.has(api_type):
 		api_url_edit.text = str(_api_url_edits[api_type])
 	else:
 		api_url_edit.text = str(API_DEFAULT_URLS.get(api_type, ""))
 	api_url_edit.placeholder_text = str(API_DEFAULT_URLS.get(api_type, ""))
+	api_url_edit.editable = not is_google
+	var dim := Color(1, 1, 1, 0.35) if is_google else Color(1, 1, 1, 1)
+	api_url_edit.modulate = dim
+	api_url_label.modulate = dim
 	api_url_edit.visible = true
 	api_url_label.visible = true
 
@@ -1513,9 +1601,14 @@ func _poll_api_check():
 
 	var ok: bool = result.get("available", false)
 	var msg: String
-	var api_name := "SimplyTranslate" if _selected_api_type() == "simplytranslate" else "LingvaTranslate"
+	var api_name := _selected_api_name()
 	if ok:
 		msg = "%s 检测成功：API 可用，翻译成功" % api_name
+		if _selected_api_type() == "google":
+			# 非官方接口免责声明
+			msg += "\n此为非官方API，使用导致的一切后果本软件及制作团队不负任何责任。"
+	elif _selected_api_type() == "google":
+		msg = "%s 检测失败：%s" % [api_name, str(result.get("message", "请检查网络连接或 API URL 配置"))]
 	else:
 		msg = "%s 检测失败：请检查服务是否已启动、URL 配置是否正确" % api_name
 	_api_available = ok
@@ -1563,7 +1656,13 @@ func _reap_orphan_tasks():
 
 # ======== Toast ========
 
+## Toast 序号：旧提示的延时自动隐藏不得关闭新提示，
+## 否则“正在检测 API...”的 2 秒倒计时会把随后的检测结果/免责声明一并关掉
+var _toast_seq: int = 0
+
 func _show_toast(msg: String, auto_close: bool = true):
+	_toast_seq += 1
+	var seq := _toast_seq
 	_toast_label.text = msg
 	_toast_label.visible = true
 	_toast_label.position = Vector2(0, size.y - 60)
@@ -1571,7 +1670,7 @@ func _show_toast(msg: String, auto_close: bool = true):
 	_toast_click_to_close = not auto_close
 	if auto_close:
 		await get_tree().create_timer(2.0).timeout
-		if _toast_label and _toast_label.visible:
+		if _toast_label and _toast_label.visible and seq == _toast_seq:
 			_toast_label.visible = false
 			_toast_click_to_close = false
 
@@ -1655,6 +1754,24 @@ func _on_replace_pressed():
 
 # --------------------- 单条翻译 ---------------------
 
+## 加载当前 PO 对应的 Excel 规则（按文件名匹配列头，结果缓存）
+func _get_rule_engine() -> RefCounted:
+	if _current_file_name.is_empty() or _project_path.is_empty():
+		return null
+	var po_name := _current_file_name.get_basename()
+	if _rule_engine != null and _rule_engine_file == po_name:
+		return _rule_engine
+	var xlsx_path := _project_path.path_join("翻译规则.xlsx")
+	if not FileAccess.file_exists(xlsx_path):
+		return null
+	var engine = RuleEngineScript.new()
+	engine.load_rules(xlsx_path, po_name)
+	if not engine.has_rules():
+		return null
+	_rule_engine = engine
+	_rule_engine_file = po_name
+	return engine
+
 ## 用户点击某条目的“翻译”按钮
 func _on_entry_translate(entry_index: int):
 	if entry_index < 0 or _translating:
@@ -1707,6 +1824,22 @@ func _start_next_single_translate():
 		_finish_single_translate(idx, "")
 		return
 
+	# 规则优先于机翻：精确/语境/前后缀/片段/自定义白名单命中时直接使用规则译文
+	_single_translate_pmap = {}
+	var engine = _get_rule_engine()
+	if engine != null:
+		var data: Dictionary = _po_data.get(_current_file_name, {})
+		var src_locs: PackedStringArray = data.get("source_locations", PackedStringArray())
+		var ctx := src_locs[idx] if idx < src_locs.size() else ""
+		var rule_results: Dictionary = engine.apply_rules([{"index": idx, "msgid": mid, "context": ctx}])
+		if rule_results.has(idx):
+			_finish_single_translate(idx, str(rule_results[idx]), "rule")
+			return
+		# 正则保护：占位符不送翻译，结果返回后还原
+		var protected: Dictionary = engine.apply_regex_protect(mid)
+		mid = str(protected.get("text", mid))
+		_single_translate_pmap = protected.get("map", {})
+
 	var src_lang: String = _lang_list[src_lang_option.selected]["code"]
 	var target_lang: String = _lang_list[target_lang_option.selected]["code"]
 
@@ -1738,6 +1871,10 @@ func _poll_single_translate():
 	var translated := ""
 	if _single_translate_result_holder.get("ok", false):
 		translated = str(_single_translate_result_holder.get("text", ""))
+		if not _single_translate_pmap.is_empty():
+			var engine = _get_rule_engine()
+			if engine != null:
+				translated = engine.restore_regex_protect(translated, _single_translate_pmap)
 	_finish_single_translate(idx, translated)
 
 func _kill_single_translate_timer():
@@ -1747,7 +1884,8 @@ func _kill_single_translate_timer():
 		_single_translate_timer = null
 
 ## 结束单条翻译：写入结果、保存、继续处理队列
-func _finish_single_translate(idx: int, translated_text: String):
+## source: "ai"（机翻）或 "rule"（Excel 规则命中，规则优先于机翻）
+func _finish_single_translate(idx: int, translated_text: String, source: String = "ai"):
 	_translating_entries.erase(idx)
 	if _single_translate_current == idx:
 		_single_translate_current = -1
@@ -1759,8 +1897,8 @@ func _finish_single_translate(idx: int, translated_text: String):
 		var msgids: PackedStringArray = data.get("msgids", PackedStringArray())
 		if idx < msgstrs.size():
 			msgstrs[idx] = translated_text
-			_translation_source[idx] = "ai"
-			if _translation_memory != null and idx < msgids.size():
+			_translation_source[idx] = source
+			if source == "ai" and _translation_memory != null and idx < msgids.size():
 				_translation_memory.record(msgids[idx], translated_text)
 				_memory_dirty = true
 			_mark_dirty(idx, "msgstr")

@@ -1,91 +1,162 @@
 # === PoTranslatorByHAN · Excel 规则表桥接 ===
-# 通过 Python + openpyxl 读取 翻译规则.xlsx，返回 JSON
+# 通过 Python 标准库（zipfile + ElementTree）读取 翻译规则.xlsx，返回 JSON
+# 不依赖 openpyxl，与 translate_full.py 的解析方式保持一致
 # GDScript 侧运行规则引擎：正则保护 → 前后缀 → 片段匹配 → 精确匹配 → 语境 → 自定义白名单
 class_name TranslateTableRule
 extends RefCounted
 
 # — Python 读取脚本（内嵌，避免外部文件依赖） —
 const PY_SCRIPT := """
-import json, sys, openpyxl
+import json, sys, zipfile
+import xml.etree.ElementTree as ET
 
 xlsx_path = sys.argv[1]
 po_name = sys.argv[2]   # PO 文件名（不含 .po）
+NS = {'s': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 
-wb = openpyxl.load_workbook(xlsx_path, data_only=True)
 
-def col_for_name(sheet, name):
-    for c in range(1, sheet.max_column + 1):
-        if str(sheet.cell(2, c).value or "").strip() == name:
-            return c
-    return -1
+def read_shared_strings(zf):
+    if 'xl/sharedStrings.xml' not in zf.namelist():
+        return []
+    root = ET.fromstring(zf.read('xl/sharedStrings.xml').decode('utf-8'))
+    out = []
+    for si in root.findall('.//s:si', NS):
+        texts = si.findall('.//s:t', NS)
+        out.append(''.join(t.text or '' for t in texts))
+    return out
+
+
+def read_sheet(zf, sheet_file, shared):
+    if sheet_file not in zf.namelist():
+        return []
+    root = ET.fromstring(zf.read(sheet_file).decode('utf-8'))
+    rows = []
+    for row in root.findall('.//s:row', NS):
+        cells = {}
+        for c in row.findall('s:c', NS):
+            ref = c.get('r', '')
+            col = ref.rstrip('0123456789')
+            val = ''
+            t = c.get('t', '')
+            if t == 's':
+                v = c.find('s:v', NS)
+                if v is not None and v.text:
+                    try:
+                        idx = int(v.text)
+                        if 0 <= idx < len(shared):
+                            val = shared[idx]
+                    except ValueError:
+                        pass
+            elif t in ('inlineStr', 'str'):
+                is_el = c.find('s:is', NS)
+                if is_el is not None:
+                    t_el = is_el.find('s:t', NS)
+                    if t_el is not None and t_el.text:
+                        val = t_el.text
+            else:
+                v = c.find('s:v', NS)
+                if v is not None and v.text:
+                    val = v.text
+            cells[col] = val.strip() if val else ''
+        rows.append(cells)
+    return rows
+
+
+def find_col(rows, name):
+    if len(rows) < 2:
+        return ''
+    header = rows[1]
+    for col in header:
+        if col == 'A':
+            continue
+        if header[col].strip() == name:
+            return col
+    return ''
+
 
 result = {
-    "regex": [],         # [pattern, ...]
-    "prefix": [],        # [[src, tgt], ...]
-    "suffix": [],        # [[src, tgt], ...]
-    "substring": [],     # [[src, tgt], ...]
-    "exact": [],         # [[src, tgt], ...]
-    "context": [],       # [[msgid, keyword, tgt], ...]
-    "custom_exact": []   # [[src, tgt], ...]  用户自定义工作表，后命中覆盖
+    "regex": [],
+    "prefix": [],
+    "suffix": [],
+    "substring": [],
+    "exact": [],
+    "context": [],
+    "custom_exact": []   # 用户自定义工作表（角色/技能/地名等），优先级最高
 }
 
-for name in wb.sheetnames:
-    ws = wb[name]
-    if ws.max_row < 3:
-        continue
-    col = col_for_name(ws, po_name)
+try:
+    zf = zipfile.ZipFile(xlsx_path, 'r')
+    shared = read_shared_strings(zf)
+    wb_root = ET.fromstring(zf.read('xl/workbook.xml').decode('utf-8'))
+    sheets = []
+    for sheet in wb_root.findall('.//s:sheet', NS):
+        name = sheet.get('name', '')
+        sid = sheet.get('sheetId', '')
+        sheets.append((name, 'xl/worksheets/sheet%s.xml' % sid))
 
-    if name == "》正则保护":
-        for r in range(3, ws.max_row + 1):
-            v = str(ws.cell(r, 1).value or "").strip()
-            if v:
-                result["regex"].append(v)
+    for name, sheet_file in sheets:
+        if name == '》使用说明':
+            continue
+        rows = read_sheet(zf, sheet_file, shared)
+        if len(rows) < 3:
+            continue
+        col = find_col(rows, po_name)
 
-    elif name == "》前后缀规则":
-        if col > 0:
-            for r in range(3, ws.max_row + 1):
-                src = str(ws.cell(r, 1).value or "").strip()
-                pos = str(ws.cell(r, 2).value or "").strip()
-                tgt = str(ws.cell(r, col).value or "").strip()
-                if src and pos and tgt:
-                    if pos == "前缀":
-                        result["prefix"].append([src, tgt])
-                    elif pos == "后缀":
-                        result["suffix"].append([src, tgt])
+        if name == '》正则保护':
+            for r in rows[2:]:
+                v = r.get('A', '')
+                if v:
+                    result["regex"].append(v)
 
-    elif name == "》片段匹配":
-        if col > 0:
-            for r in range(3, ws.max_row + 1):
-                src = str(ws.cell(r, 1).value or "").strip()
-                tgt = str(ws.cell(r, col).value or "").strip()
-                if src and tgt:
-                    result["substring"].append([src, tgt])
+        elif name == '》前后缀规则':
+            if col:
+                for r in rows[2:]:
+                    src = r.get('A', '')
+                    pos = r.get('B', '')
+                    tgt = r.get(col, '')
+                    if src and pos and tgt:
+                        if pos == '前缀':
+                            result["prefix"].append([src, tgt])
+                        elif pos == '后缀':
+                            result["suffix"].append([src, tgt])
 
-    elif name == "》精确匹配":
-        if col > 0:
-            for r in range(3, ws.max_row + 1):
-                src = str(ws.cell(r, 1).value or "").strip()
-                tgt = str(ws.cell(r, col).value or "").strip()
-                if src and tgt:
-                    result["exact"].append([src, tgt])
+        elif name == '》片段匹配':
+            if col:
+                for r in rows[2:]:
+                    src = r.get('A', '')
+                    tgt = r.get(col, '')
+                    if src and tgt:
+                        result["substring"].append([src, tgt])
 
-    elif name == "》语境翻译":
-        if col > 0:
-            for r in range(3, ws.max_row + 1):
-                mid = str(ws.cell(r, 1).value or "").strip()
-                kw  = str(ws.cell(r, 2).value or "").strip()
-                tgt = str(ws.cell(r, col).value or "").strip()
-                if mid and kw and tgt:
-                    result["context"].append([mid, kw, tgt])
+        elif name == '》精确匹配':
+            if col:
+                for r in rows[2:]:
+                    src = r.get('A', '')
+                    tgt = r.get(col, '')
+                    if src and tgt:
+                        result["exact"].append([src, tgt])
 
-    elif not name.startswith("》"):
-        # 用户自定义工作表 → 视为精确匹配（后命中覆盖）
-        if col > 0:
-            for r in range(3, ws.max_row + 1):
-                src = str(ws.cell(r, 1).value or "").strip()
-                tgt = str(ws.cell(r, col).value or "").strip()
-                if src and tgt:
-                    result["custom_exact"].append([src, tgt])
+        elif name == '》语境翻译':
+            if col:
+                for r in rows[2:]:
+                    mid = r.get('A', '')
+                    kw = r.get('B', '')
+                    tgt = r.get(col, '')
+                    if mid and kw and tgt:
+                        result["context"].append([mid, kw, tgt])
+
+        elif not name.startswith('》'):
+            # 用户自定义工作表：作为最高优先级的精确白名单
+            if col:
+                for r in rows[2:]:
+                    src = r.get('A', '')
+                    tgt = r.get(col, '')
+                    if src and tgt:
+                        result["custom_exact"].append([src, tgt])
+
+    zf.close()
+except Exception:
+    pass
 
 print(json.dumps(result, ensure_ascii=False))
 """
@@ -213,11 +284,13 @@ func apply_rules(entries: Array) -> Dictionary:
 	return results
 
 
-## 单条规则链：前后缀 → 片段匹配 → 精确匹配 → 语境 → 自定义白名单
+## 单条规则链（优先级按各 sheet 的 A1 说明）：
+## ② 前后缀 → ③ 片段匹配 → ④ 精确匹配 → ⑤ 语境翻译 → 自定义白名单（最后命中覆盖）
+## 精确/语境/自定义白名单都按“原始 msgid”匹配，不受前后缀/片段转换影响
 func _apply_rule_chain(msgid: String, context: String) -> String:
 	var text := msgid
 
-	# ① 前后缀替换（叠加生效）
+	# ② 前后缀替换（叠加生效）
 	for rule in _prefix_rules:
 		if text.begins_with(rule["src"]):
 			text = rule["tgt"] + text.substr(rule["src"].length())
@@ -225,30 +298,28 @@ func _apply_rule_chain(msgid: String, context: String) -> String:
 		if text.ends_with(rule["src"]):
 			text = text.substr(0, text.length() - rule["src"].length()) + rule["tgt"]
 
-	# ② 片段替换
+	# ③ 片段替换
 	for rule in _substring_rules:
 		text = text.replace(rule["src"], rule["tgt"])
 
-	# ③ 精确匹配（匹配的是经过前后缀+片段处理后的文本）
+	# ④ 精确匹配（整条原文完全相等）
+	var final := ""
 	for rule in _exact_rules:
-		if text == rule["src"]:
-			return rule["tgt"]
+		if msgid == rule["src"]:
+			final = rule["tgt"]
 
-	# ④ 语境翻译（后命中覆盖，类比 CSS 级联）
-	var ctx_result := ""
+	# ⑤ 语境翻译（自上而下匹配，后命中覆盖）
 	for rule in _context_rules:
-		if text == rule["msgid"] and rule["keyword"] in context:
-			ctx_result = rule["tgt"]
-	if ctx_result != "":
-		return ctx_result
+		if msgid == rule["msgid"] and rule["keyword"] in context:
+			final = rule["tgt"]
 
-	# ⑤ 自定义白名单精确匹配（后命中覆盖）
-	var custom_result := ""
+	# ⑥ 自定义白名单（优先级最高，最后命中覆盖；角色/技能/地名等）
 	for rule in _custom_exact:
-		if text == rule["src"]:
-			custom_result = rule["tgt"]
-	if custom_result != "":
-		return custom_result
+		if msgid == rule["src"]:
+			final = rule["tgt"]
+
+	if final != "":
+		return final
 
 	# 如果经过了前后缀/片段处理，返回转换后的 text（供 API 翻译使用）
 	if text != msgid:
@@ -271,7 +342,7 @@ func apply_regex_protect(text: String) -> Dictionary:
 	for re in _regex_patterns:
 		for m in re.search_all(result):
 			var original := m.get_string()
-			var placeholder := "__PO_PROT_%d__" % counter
+			var placeholder := "__PO_PROTECT_%d__" % counter
 			pmap[placeholder] = original
 			result = result.replace(original, placeholder)
 			counter += 1
@@ -285,4 +356,11 @@ func restore_regex_protect(text: String, pmap: Dictionary) -> String:
 	var result := text
 	for placeholder in pmap:
 		result = result.replace(placeholder, pmap[placeholder])
+	# 部分接口可能在占位符内部插入空格，做一次宽松兜底还原
+	var re := RegEx.new()
+	if re.compile("(?i)__\\s*PO\\s*_?\\s*PROTECT\\s*_?\\s*(\\d+)\\s*__") == OK:
+		for m in re.search_all(result):
+			var key := "__PO_PROTECT_%d__" % int(m.get_string(1))
+			if pmap.has(key):
+				result = result.replace(m.get_string(), pmap[key])
 	return result

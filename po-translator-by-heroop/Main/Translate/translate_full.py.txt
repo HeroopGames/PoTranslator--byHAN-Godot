@@ -1,4 +1,4 @@
-import json, sys, urllib.request, urllib.error, urllib.parse, traceback, os, zipfile, xml.etree.ElementTree as ET, re
+import json, sys, time, urllib.request, urllib.error, urllib.parse, traceback, os, zipfile, xml.etree.ElementTree as ET, re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 po_path       = sys.argv[1]
@@ -27,7 +27,8 @@ log("api_type=%s" % api_type)
 log("api_url=%s" % api_url)
 
 TIMEOUT  = 15
-MAX_WORKERS = 10  # 并发 AI 翻译线程数
+# 并发 AI 翻译线程数：Google 非官方接口并发过高易被限流，适当降低
+MAX_WORKERS = 5 if api_type == "google" else 10
 HDR      = {"User-Agent": "Mozilla/5.0"}
 
 # ============================================================
@@ -258,6 +259,7 @@ def load_rules(xlsx_path, po_name):
         "prefix_rules": [],
         "suffix_rules": [],
         "substring": [],
+        "custom_exact": {},   # 普通/自定义工作表（角色、技能、地名等），优先级最高
     }
     if not xlsx_path or not os.path.isfile(xlsx_path):
         return default
@@ -341,14 +343,15 @@ def load_rules(xlsx_path, po_name):
                             })
                             log("  context: '%s' #:%s → '%s'" % (msgid, keyword, trans))
             else:
-                # ---- 普通 Sheet：A=msgid, 匹配列=译文 ----
+                # ---- 普通/自定义 Sheet（角色、技能、地名等白名单）：优先级最高 ----
+                # A=msgid, 匹配列=译文；后出现的工作表覆盖先出现的同名条目
                 if po_col:
                     for r in rows[2:]:
                         src = r.get('A', '')
                         dst = r.get(po_col, '')
                         if src and dst:
-                            default["exact_match"][src] = dst
-                            log("  plain table '%s': '%s' → '%s'" % (sheet_name, src, dst))
+                            default["custom_exact"][src] = dst
+                            log("  custom '%s': '%s' → '%s'" % (sheet_name, src, dst))
 
         zf.close()
         return default
@@ -362,7 +365,10 @@ def load_rules(xlsx_path, po_name):
 # ============================================================
 #  规则引擎：将规则应用到单个条目
 #  返回 (translated_text, source_type) 或 (None, None)
-#  执行顺序：正则保护（暂存）→ 精确匹配 → 语境 → 前后缀 → 片段
+#  优先级按各 sheet 的 A1 说明：
+#    ② 前后缀 → ③ 片段 → ④ 精确 → ⑤ 语境（后命中覆盖）
+#    → 自定义白名单（角色/技能/地名等，优先级最高，最后覆盖）
+#  规则在翻译记忆和 AI 之前执行，因此白名单结果高于机翻
 # ============================================================
 
 def apply_rules(mid, ctx, ctxx, rules):
@@ -376,34 +382,42 @@ def apply_rules(mid, ctx, ctxx, rules):
     if not rules:
         return None, None
 
-    # 1. 精确匹配：整条 msgid 完全相等
-    if mid in rules.get("exact_match", {}):
-        return rules["exact_match"][mid], "rule"
-
-    # 2. 语境翻译：msgid + #: 关键词匹配
-    for cm in rules.get("context_match", []):
-        if cm["msgid"] == mid and cm["keyword"] in ctxx:
-            return cm["trans"], "rule"
-
-    # 3. 前后缀 + 片段（组合翻译）
+    # ② 前后缀 + ③ 片段（组合翻译，作用于原文）
     result = mid
 
-    # 3a. 前缀替换
+    # 2a. 前缀替换
     for pr in rules.get("prefix_rules", []):
         if result.startswith(pr["text"]):
             result = pr["trans"] + result[len(pr["text"]):]
-            break  # 只匹配第一个
 
-    # 3b. 后缀替换
+    # 2b. 后缀替换
     for sr in rules.get("suffix_rules", []):
         if result.endswith(sr["text"]):
             result = result[:-len(sr["text"])] + sr["trans"]
-            break  # 只匹配第一个
 
-    # 3c. 片段替换
+    # 2c. 片段替换
     for sub in rules.get("substring", []):
         result = result.replace(sub["src"], sub["dst"])
 
+    final_text = None
+
+    # ④ 精确匹配：整条原文完全相等
+    if mid in rules.get("exact_match", {}):
+        final_text = rules["exact_match"][mid]
+
+    # ⑤ 语境翻译：msgid + #: 关键词匹配，后命中覆盖前命中
+    for cm in rules.get("context_match", []):
+        if cm["msgid"] == mid and cm["keyword"] in ctxx:
+            final_text = cm["trans"]
+
+    # ⑥ 自定义白名单：优先级最高（角色、技能、地名等）
+    if mid in rules.get("custom_exact", {}):
+        final_text = rules["custom_exact"][mid]
+
+    if final_text is not None:
+        return final_text, "rule"
+
+    # 仅有前后缀/片段转换时，返回转换后的文本
     if result != mid:
         return result, "rule"
 
@@ -550,6 +564,14 @@ def restore_from_protection(text, placeholders):
                 text = text.replace(key, val[1])
             else:
                 text = text.replace(key, val)
+        # 容错：Google 等接口可能在占位符内插入空格，精确替换失败时用宽松正则二次还原
+        def _loose_replacer(m):
+            val = placeholders.get("__PO_PROTECT_%s__" % m.group(1))
+            if isinstance(val, tuple) and len(val) == 2:
+                return val[1]
+            return m.group(0)
+        text = re.sub(r"__\s*PO\s*_?\s*PROTECT\s*_?\s*(\d+)\s*__",
+                      _loose_replacer, text, flags=re.IGNORECASE)
     
     return text
 
@@ -589,6 +611,8 @@ def translate_one(text):
             return _translate_lingva(text)
         elif api_type == "libretranslate":
             return _translate_libre(text)
+        elif api_type == "google":
+            return _translate_google(text)
         else:
             return _translate_simply(text)
     except Exception as e:
@@ -685,6 +709,46 @@ def _translate_libre(text):
                 return result
     except Exception as e:
         log("  _translate_libre ERROR: %s | text=%s" % (str(e), text[:60]))
+    return ""
+
+def _translate_google(text):
+    """Google 非官方接口（模拟网页翻译，无需部署服务）
+    GET {base}/translate_a/single?client=dict-chrome-ex&dt=t&sl={src}&tl={tgt}&q={q}
+    默认 base 为 https://clients5.google.com（translate.googleapis.com 的 gtx 接口常被限流）
+    响应为嵌套数组: [[[译文, 原文, ...], ...], ...]，需拼接所有句段
+    语言代码直接使用 Google 的 zh-CN / zh-TW / auto
+    """
+    base_url = api_url.rstrip("/") if api_url else "https://clients5.google.com"
+    url = base_url + "/translate_a/single?client=dict-chrome-ex&dt=t&sl=%s&tl=%s&q=%s" % (
+        urllib.parse.quote(src_lang), urllib.parse.quote(target_lang),
+        urllib.parse.quote(text.encode("utf-8"))
+    )
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url, headers=HDR, method="GET")
+            r = urllib.request.urlopen(req, timeout=TIMEOUT)
+            data = json.loads(r.read().decode(errors="replace"))
+            parts = []
+            if isinstance(data, list) and data and isinstance(data[0], list):
+                for seg in data[0]:
+                    if isinstance(seg, list) and len(seg) > 0 and seg[0]:
+                        parts.append(str(seg[0]))
+            result = "".join(parts)
+            if result.strip():
+                return result
+            log("  _translate_google: bad response | text=%s" % text[:60])
+            return ""
+        except urllib.error.HTTPError as e:
+            # 429 为接口限流，短暂退避后重试（其它错误不重试，避免网络异常时长时间卡顿）
+            if e.code == 429 and attempt < 2:
+                log("  _translate_google: 429 限流，第 %d 次重试..." % (attempt + 1))
+                time.sleep(1.0 * (attempt + 1))
+                continue
+            log("  _translate_google ERROR: %s | text=%s" % (str(e), text[:60]))
+            return ""
+        except Exception as e:
+            log("  _translate_google ERROR: %s | text=%s" % (str(e), text[:60]))
+            return ""
     return ""
 
 def write_progress(done, total, current):
@@ -803,6 +867,7 @@ try:
 
     log("All done. Translated %d/%d. Sources: rule=%d memory=%d ai=%d" % (
         success_count,
+        pending_total,
         sum(1 for v in sources.values() if v == "rule"),
         sum(1 for v in sources.values() if v == "memory"),
         sum(1 for v in sources.values() if v == "ai")

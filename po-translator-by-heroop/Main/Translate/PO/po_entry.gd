@@ -10,6 +10,15 @@ signal entry_unhovered(entry_index: int)
 signal entry_checked(entry_index: int, checked: bool)
 signal entry_translate(entry_index: int)
 signal entry_translate_stop(entry_index: int)
+# 编辑时行高变化（文本超出可视区域时自动增高，避免 TextEdit 内部滚动条）
+signal entry_height_changed(entry_index: int, height: float)
+# 退出编辑态（父级按最新文本重新计算常规行高）
+signal entry_edit_finished(entry_index: int)
+
+# 行内固定控件占宽（翻译按钮 40 + 4 个间隔 40 + 箭头 14 + 复选框约 26）
+const EDIT_FIXED_WIDTH: float = 120.0
+const ROW_VERTICAL_PADDING: float = 36.0
+const ROW_BOTTOM_OFFSET: float = 16.0
 
 @onready var src_label: RichTextLabel = $Row/SrcLabel
 @onready var src_edit: TextEdit = $Row/SrcEdit
@@ -28,6 +37,9 @@ var _is_translating: bool = false
 var original_src: String = ""
 var original_dst: String = ""
 var _source: String = ""  # "manual" | "rule" | "memory" | "ai" | "" = 未翻译
+var _base_row_height: float = 56.0   # 常规（非编辑）行高
+var _edit_row_height: float = 56.0   # 当前实际行高
+var _fit_queued: bool = false
 
 # — 高亮缓存：上次高亮用的搜索词和原始文本 —
 var _last_search_text: String = ""
@@ -79,11 +91,14 @@ static func measure_height(msgid: String, msgstr: String, label_width: float) ->
 ## 填充条目数据并重置为显示态（直接传参，避免每帧 new Dictionary）
 func set_entry(msgid: String, msgstr: String, source: String, row_height: float, entry_index: int):
 	_entry_index = entry_index
+	_base_row_height = row_height
+	_edit_row_height = row_height
 	custom_minimum_size.y = row_height
 	size.y = row_height
 
 	# 先改模式再隐藏控件，防止隐藏时触发 focus_exited 保存
 	_edit_mode = EditMode.NONE
+	set_process(false)
 	src_label.visible = true
 	src_edit.visible = false
 	dst_label.visible = true
@@ -184,6 +199,7 @@ func is_checked() -> bool:
 ## 进入编辑态（显示 TextEdit，隐藏 Label，抢焦点）
 func _switch_to_edit(which: EditMode):
 	_edit_mode = which
+	set_process(true)
 	print("[PoEntry] 试图手动修改PO")
 	# 更新 BackBufferCopy 区域并显示模糊背景
 	_update_blur_rect()
@@ -197,6 +213,8 @@ func _switch_to_edit(which: EditMode):
 		dst_edit.visible = true
 		dst_edit.grab_focus()
 	$Row.queue_sort()
+	_fit_height_to_edit(which)
+	_queue_fit_height()
 
 ## 退出编辑态回到显示态（不保存，仅切换 UI）
 func _switch_to_display():
@@ -204,6 +222,7 @@ func _switch_to_display():
 		return
 	var prev := _edit_mode
 	_edit_mode = EditMode.NONE
+	set_process(false)
 	blur_bg.visible = false
 	if prev == EditMode.SRC:
 		src_label.visible = true
@@ -212,10 +231,66 @@ func _switch_to_display():
 		dst_label.visible = true
 		dst_edit.visible = false
 	$Row.queue_sort()
+	# 由父级按最新文本重新计算该行常规高度（可能含换行）
+	_edit_row_height = _base_row_height
+	if _entry_index >= 0:
+		entry_edit_finished.emit(_entry_index)
 
 ## 更新 BackBufferCopy 区域以匹配当前条目大小
 func _update_blur_rect():
 	backbuffer_copy.rect = Rect2(Vector2.ZERO, size)
+
+## 编辑框文本变化时重新适配高度（延迟到布局完成后测量）
+func _on_edit_text_changed():
+	if _edit_mode != EditMode.NONE:
+		_queue_fit_height()
+
+## 延迟一帧再测量：此时布局宽度与 TextEdit 的最小高度已更新
+func _queue_fit_height():
+	if _fit_queued:
+		return
+	_fit_queued = true
+	call_deferred("_deferred_fit_height")
+
+func _deferred_fit_height():
+	_fit_queued = false
+	if _edit_mode == EditMode.NONE:
+		return
+	_fit_height_to_edit(_edit_mode)
+
+## 按当前编辑文本计算所需高度并同步给虚拟列表，避免 TextEdit 内部滚动条
+func _fit_height_to_edit(which: EditMode):
+	var edit: TextEdit = src_edit if which == EditMode.SRC else dst_edit
+	var needed := _estimate_edit_height(edit)
+	if absf(needed - _edit_row_height) < 1.0:
+		return
+	_edit_row_height = needed
+	custom_minimum_size.y = needed
+	size.y = needed
+	if blur_bg.visible:
+		_update_blur_rect()
+	if _entry_index >= 0:
+		entry_height_changed.emit(_entry_index, needed)
+
+## 估算编辑框所需高度：
+## 按 TextEdit 的实际折行数计算（1 个逻辑行 + 折行数），加上内边距。
+## 该结果只取决于文本和宽度，不依赖当前控件高度，避免自动增高反馈循环。
+func _estimate_edit_height(edit: TextEdit) -> float:
+	if edit.size.x > 8.0:
+		var line_total := 0
+		for i in edit.get_line_count():
+			line_total += 1 + edit.get_line_wrap_count(i)
+		var content_h := float(line_total) * float(edit.get_line_height())
+		return maxf(_base_row_height, content_h + ROW_BOTTOM_OFFSET)
+	var edit_w := edit.size.x
+	if edit_w <= 8.0:
+		edit_w = maxf((size.x - EDIT_FIXED_WIDTH) * 0.5, 40.0)
+	var font := edit.get_theme_font("font")
+	var font_size := edit.get_theme_font_size("font_size")
+	var text_h := font.get_string_size(
+		edit.text, HORIZONTAL_ALIGNMENT_LEFT, maxf(edit_w - 12.0, 20.0), font_size
+	).y
+	return maxf(_base_row_height, text_h + ROW_VERTICAL_PADDING)
 
 
 # --------------------- 保存 / 取消 ---------------------
@@ -335,6 +410,15 @@ func _ready():
 	mouse_exited.connect(_on_mouse_exited)
 	chk_select.toggled.connect(_on_chk_toggled)
 	translate_btn.pressed.connect(_on_translate_btn_pressed)
+	src_edit.text_changed.connect(_on_edit_text_changed)
+	dst_edit.text_changed.connect(_on_edit_text_changed)
+	set_process(false)
+
+## 编辑期间持续校准高度：宽度变化/折行更新后也能立即撑开，避免内部滚动条
+func _process(_delta: float):
+	if _edit_mode == EditMode.NONE or not is_visible_in_tree():
+		return
+	_fit_height_to_edit(_edit_mode)
 
 func _on_mouse_entered():
 	if _entry_index >= 0:
